@@ -1,8 +1,15 @@
 function [clusterDetails, spike_xy, spike_features] = autocluster_init(Spikes,params)
-% [clusterDetails, spike_xy, spike_features] = autocluster_init(Spikes,params)
-% tries different sets of features, as well as iterative template matching
-% to find the best 2-cluster model. Also tries 3 component (2 cluster)
-% model with template scores.
+% [clusterDetails, spike_xy, spike_features] = autocluster_init(Spikes,<params>)
+% Fit gaussian mixture models to struct of spike data using several different sets of featurs (and init strategies)
+% and picks the best one.
+% Finds the best 2-cluster model. Also tries a 3 component (2 cluster) model with template scores.
+% INPUTS:
+%   Spikes: struct containing voltage waveform (.V), time of spike peak (.times), and spike peak
+%   params: struct of parameters
+% OUTPUTS:
+%   clusterDetails: struct of data describing cluster fit
+%   spike_xy: 2d projection of spike features used for visualizing the results
+%   spike_features: Full set of features for each spike used to fit clusters
 
 %% SETS DEFAULT PARAMETERS NEEDED. Note, many of these are redundant with defaults set in detect_and_cluster_init. So, these are only used if this function is being used as a standalone.
 
@@ -16,37 +23,38 @@ if ~isfield(params,'verbose')
     params.verbose = 0; %controls level of print detail
 end
 if ~isfield(params,'use_best_only')
-    params.use_best_only = 0; %use only the best cluster waveform as template?
+    params.use_best_only = false; %use only the best cluster waveform as template?
 end
 if ~isfield(params,'cluster_bias')
     params.cluster_bias = 0.5;  %posterior probability threshold for classifying as SU
 end
 if ~isfield(params,'reg_lambda')
-    params.reg_lambda = 1e-5;
+    params.reg_lambda = 0; %regularization on Cov Mats for EM (Matlab based, doesnt seem to help)
 end
 if ~isfield(params,'max_back_comps')
-    params.max_back_comps = 3;
+    params.max_back_comps = 3; %maximum number of Gaussians to try modeling background noise with
 end
-if ~isfield(params,'n_pcs')
-params.n_pcs = 4;
+if ~isfield(params,'n_pcs') 
+params.n_pcs = 4; %number of PCs
 end
 if ~isfield(params,'n_tdims')
-params.n_tdims = 4;
+params.n_tdims = 4; %number of voltage dimensions
 end
 
-%% compute pcs
 [N_spks,D,N_chs] = size(Spikes.V);
-if N_chs > 1
+
+%% compute PCs
+if N_chs > 1 %fold data into single vector for each spike if using multiple channels
     AllV = reshape(Spikes.V,N_spks,D*N_chs);
 else
     AllV = Spikes.V;
 end
 C = cov(AllV);
 [pc_coeffs, E] = eig(C);
-[a,b] = max(diag(E));
+[~,b] = max(diag(E));
 Eval = diag(E);
 if b == 1
-    fprintf('Max Eigernvector First\n');
+    fprintf('Max Eigenvector First\n');
 else
     pc_coeffs = fliplr(pc_coeffs); %put largest first;
     Eval = Eval(end:-1:1);
@@ -62,7 +70,9 @@ pc_scores = AllV*pc_coeffs;
 
 %% INITIAL CLUSTERING IN PC SPACE
 if ismember(1,params.try_features)
-    n_comps = 2;
+    n_comps = 2; %number of Gaussian components
+    
+    %pick set of PCs to use
 %     pc_ks = nan(D,1);
 %     for ii = 1:D
 %         pc_ks(ii) = lillie_KSstat(pc_scores(:,ii));
@@ -71,9 +81,10 @@ if ismember(1,params.try_features)
 %     use_pcs = use_pcs(1:params.n_pcs);
      use_pcs = 1:params.n_pcs;
    
+     %fit initial model and store results as first element of results arrays
     [GMM_obj{1}, distance(1),all_comp_idx(:,1),all_clust_labels{1},cluster_stats] = ...
         GMM_fit(Spikes.V,pc_scores(:,use_pcs),n_comps,params,n_comps);
-    if isobject(GMM_obj{1})
+    if isobject(GMM_obj{1}) %if fit worked
         LL(1) = GMM_obj{1}.NlogL;
         
         new_GMM_obj = GMM_obj{1};

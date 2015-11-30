@@ -10,8 +10,8 @@ addpath('~/autocluster/');
 global data_dir base_save_dir init_save_dir Expt_name Vloaded n_probes loadedData raw_block_nums
 
 data_loc = '/media/NTlab_data3/Data/bruce/'; %directory containing raw data
-Expt_name = 'M012'; %short name of experiment
-monk_name = 'jbe'; %(lem and jbe are the two monkeys so far)
+Expt_name = 'M320'; %short name of experiment
+monk_name = 'lem'; %(lem and jbe are the two monkeys so far)
 rec_type = 'LP'; %type of recording (LP for laminar probe, or UA for Utah array)
 rec_number = 1;
 
@@ -42,7 +42,7 @@ clust_params.min_Pcomp = 0.005; %minimum component probability (having this non-
 clust_params.use_ms = false; %use mean-subtraction on templates (control whether this is a dot-product, or a correlation based similarity measure)
 clust_params.try_features = [1 2 4]; %features to use from the set: [PCs Voltage Energy Templates]
 clust_params.max_back_comps = 2; %maximum N components for modeling background spikes
-clust_params.cluster_bias = 0.5; %minimum posterior prob to assign to non-background cluster
+clust_params.cluster_bias = 0.5; %minimum posterior prob to assign a spike to non-background (SU) cluster
 clust_params.target_rate = 50; %target rate for spike detection
 
 %% PICK BLOCKS TO RUN INITIAL CLUSTER FITTING ON
@@ -99,7 +99,7 @@ end
 %% PERFORM INITIAL CLUSTERING
 fprintf('Fitting initial models on blocks %s ...\n',sprintf('%d ',poss_base_blocks));
 fprintf('Using %d probes ...\n',length(target_probes));
-block_all_dprimes = nan(length(poss_base_blocks,length(target_probes)));
+block_all_dprimes = nan(length(poss_base_blocks),length(target_probes));
 for bb = 1:length(poss_base_blocks) %loop over initial set of blocks
     cur_base_block = poss_base_blocks(bb); %current block num
     cur_raw_block = raw_block_nums(cur_base_block); %number of current block in raw data file
@@ -191,9 +191,10 @@ end
 
 %% INITIALIZE REFERENCE CLUSTERS BASED ON INITIAL CLUSTER FITS
 fprintf('Saving REFCLUSTERS details\n');
-[best_dprimes,best_blocks] = nanmax(block_all_dprimes,[],1);
+[best_dprimes,best_blocks] = nanmax(block_all_dprimes,[],1); %select as reference block, the clustering with the largest dprime
 %NOTE, you can manually change the reference block used for each probe here
 
+%initialize ref clusters
 target_base_block = poss_base_blocks(1);
 dat_name = [base_save_dir sprintf('/Block%d_Clusters.mat',target_base_block)];
 load(dat_name,'Clusters');
@@ -201,6 +202,8 @@ RefClusters = Clusters;
 rclust_dat_name = [base_save_dir '/Ref_Clusters.mat'];
 save(rclust_dat_name,'RefClusters');
 
+%loop over all possible base-blocks and set the refclusters for those probes where that block gave
+%the best clustering
 for bb = 1:length(poss_base_blocks)
     target_base_block = poss_base_blocks(bb);
     dat_name = [base_save_dir sprintf('/Block%d_Clusters.mat',target_base_block)];

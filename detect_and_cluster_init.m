@@ -1,36 +1,47 @@
 function [clusterDetails,spike_features,sum_fig] = detect_and_cluster_init(sfile,params,use_chs)
+% [clusterDetails,spike_features,sum_fig] = detect_and_cluster_init(sfile,<params>,<use_chs>)
+% takes a data file, detects spikes, and then performs initial clustering
+% INPUTS:
+%   sfile: data file. Either filename, or struct containing voltage, timestamp, and Fs 
+%   <params>: struct of params
+%   <use_chs>: channels to use for clustering (default is all channels provided)
+% OUTPUTS:
+%   clusterDetails: struct containing information about the resulting clustering
+%   spike_features: (Nxp) array of features extracted from spikes, N is num spikes, p is num dims
+%   sum_fig: handle for summary figure
 
+
+%% DEFAULT PARAMETERS
 if nargin < 3 || isempty(use_chs)
     use_chs = nan;
 end
 
-%% DEFAULT PARAMETERS
 if nargin < 2 || isempty(params)
-    params = struct();
+    params = struct(); %set to empty struct if none provided
 end
-if ~isfield(params,'filt_cutoff') %high-pass for filtering raw V for spike detection
-    params.filt_cutoff = [100 nan]; 
+if ~isfield(params,'filt_cutoff') 
+    params.filt_cutoff = [100 nan]; %high-pass for filtering raw V for spike detection (if sfile is provided as file name)
 end
-if ~isfield(params,'add_Vmean') %whether or not to add in across-electrode average FullV
-    params.add_Vmean = 0;
+if ~isfield(params,'add_Vmean') 
+    params.add_Vmean = false; %whether or not to add in across-electrode average FullV (if sfile is provided as file name)
 end
-if ~isfield(params,'thresh_sign') %whether to detect on peaks or valleys
-    params.thresh_sign = -1;
+if ~isfield(params,'thresh_sign') 
+    params.thresh_sign = -1; %whether to detect on peaks (+1) or valleys (-1)
 end
-if ~isfield(params,'target_rate') %target spike detection rate. 
-    params.target_rate = 50;
+if ~isfield(params,'target_rate')
+    params.target_rate = 50; %target spike detection rate (Hz). Set to 'median' to use a fixed amp-threshold
 end
-if ~isfield(params,'spk_pts')
+if ~isfield(params,'spk_pts') 
     params.spk_pts = [-12:27]; %set of time points relative to trigger to use for classification
 end
 if ~isfield(params,'outlier_thresh')
     params.outlier_thresh = 7; %threshold on Mahal distance (sqrt) to count a point as an outlier
 end
 if ~isfield(params,'verbose')
-    params.verbose = 2; %display text
+    params.verbose = 2; %display text during fitting
 end
 if ~isfield(params,'use_best_only')
-    params.use_best_only = 0; %use only the best spike waveform for calculating template features.
+    params.use_best_only = false; %use only the best spike waveform (if using multi-channel) for calculating template features.
 end
 if ~isfield(params,'cluster_bias')
     params.cluster_bias = 0.85; %bias to control type 2 errors for classifying SUs
@@ -52,7 +63,7 @@ if ~isfield(params,'try_features')
     params.try_features = [1 2 4]; %which features to try clustering with.
 end
 if ~isfield(params,'min_Pcomp')
-    min_Pcomp = 0.005; %minimum cluster probability (basically minimum firing rate)
+    params.min_Pcomp = 0.005; %minimum cluster probability (basically minimum firing rate)
 end
 if ~isfield(params,'max_n_retriggers')
     params.max_n_retriggers = 3; %max number of times to try retriggering
@@ -65,38 +76,41 @@ if ~isfield(params,'max_back_comps')
 end
 
 %% LOAD VOLTAGE SIGNAL
-
 %loads in (high-pass filtered) voltage signal
-if isstr(sfile)
+if ischar(sfile) %if file name given
     [V,Vtime,Fs] = Load_FullV(sfile, params.add_Vmean, params.filt_cutoff,use_chs);
-else
+else %if already provided as struct
     V = sfile.V(:,use_chs);
     Vtime = sfile.Vtime;
     Fs = sfile.Fs;
 end
+
 %% DETECT SPIKES
 if strcmp(params.target_rate,'median')
-    target_Nspks = 'median';
+    target_Nspks = 'median'; %if using fixed amp-threshold
 else
-    target_Nspks = params.target_rate*length(V)/Fs;
+    target_Nspks = params.target_rate*length(V)/Fs; %target number of spikes
 end
 
+%determine channel from which to trigger spikes
 if length(use_chs) == 1
     trig_ch = 1;
-elseif length(use_chs) == 2
-    if use_chs(1) == 1
-        trig_ch = 1 ;
+elseif length(use_chs) == 2 %if using only 2 chs, assume we're at the edge of the probe
+    if use_chs(1) == 1 %if we're at the top edge, trigger off the top ch.
+        trig_ch = 1;
     else
-        trig_ch = 2;
+        trig_ch = 2; %otherwise, we're at the bottom edge, trigger off the lower ch
     end
-else
-    trig_ch = 2;
+elseif length(use_chs) == 3
+    trig_ch = 2; %if using 3, trigger off the middle one
+else %havent written this condition yet
+    error('need to write method to select trigger channel with this number of chs');
 end
 
-[spk_id, trig_thresh,noise_sigma] = triggerSpikes(V(:,trig_ch),params.thresh_sign,target_Nspks);
+[spk_id, trig_thresh,noise_sigma] = triggerSpikes(V(:,trig_ch),params.thresh_sign,target_Nspks); %trigger spikes from trig_ch
 
-%check if identified trigger threshold is too high above the estimated
-%noise level. If so, lower threshold and retrigger
+%check if identified trigger threshold is too high above the estimated noise level. 
+% If so, lower threshold and retrigger
 if trig_thresh/noise_sigma >= params.noise_thresh
     fprintf('Lowering trigger threshold to %.2f sigma\n',params.noise_thresh);
     new_trig = params.noise_thresh*noise_sigma;
@@ -107,19 +121,19 @@ spk_id(spk_id <= abs(params.spk_pts(1)) | spk_id >= length(V)-params.spk_pts(end
 %extract spike snippets
 Spikes = getSpikeSnippets(V,Vtime,spk_id,params.spk_pts,trig_ch);
 
-% artifact detection
-artifact_ids = find_spike_artifacts(Spikes,params);
+% detect putative artifacts and get rid of them
+artifact_ids = find_spike_artifacts(Spikes);
 Spikes.V(artifact_ids,:,:) = [];
 Spikes.times(artifact_ids) = [];
 Spikes.trig_vals(artifact_ids) = [];
-spk_id(artifact_ids) = []; %bug-fix 12/17/2013
+spk_id(artifact_ids) = []; 
 if params.verbose > 0
     fprintf('Removed %d potential artifacts\n',length(artifact_ids));
 end
 
 [N_spks, N_samps, N_chs] = size(Spikes.V);
 
-%% GMM AUTOCLUSTERING USING MULTIPLE FEATURES AND MULTIPLE INITIALIZATIONS. 
+%% RUN GMM AUTOCLUSTERING USING MULTIPLE FEATURES AND MULTIPLE INITIALIZATIONS. 
 params.trig_ch = trig_ch;
 [clusterDetails, spike_xy, spike_features] = autocluster_init(Spikes,params);
 if ischar(sfile)
