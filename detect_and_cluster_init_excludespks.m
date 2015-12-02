@@ -1,5 +1,18 @@
 function [clusterDetails,all_spike_features,sum_fig,Spikes] = detect_and_cluster_init_excludespks(sfile,params,use_chs,exclude_spk_inds)
+% [clusterDetails,all_spike_features,sum_fig,Spikes] = detect_and_cluster_init_excludespks(sfile,params,<use_chs>,<exclude_spk_inds>)
+% like detect_and_cluster_init, but with specified set of spikes excluded
+% INPUTS:
+%   sfile: data file. Either filename, or struct containing voltage, timestamp, and Fs 
+%   <params>: struct of params
+%   <use_chs>: channels to use for clustering (default is all channels provided)
+%   <exclude_spk_inds>: index values of spikes to exclude from clustering
+% OUTPUTS:
+%   clusterDetails: struct containing information about the resulting clustering
+%   all_spike_features: (Nxp) array of features extracted from ALL spikes, N is num spikes, p is num dims
+%   sum_fig: handle for summary figure
+%   Spikes: Spike data struct (NOT including excluded spikes)
 
+%% DEFAULT PARAMETERS
 if nargin < 3 || isempty(use_chs)
     use_chs = nan;
 end
@@ -7,7 +20,6 @@ if nargin < 4
     exclude_spk_inds = [];
 end
 
-%% DEFAULT PARAMETERS
 if nargin < 2 || isempty(params)
     params = struct();
 end
@@ -68,9 +80,8 @@ if ~isfield(params,'max_back_comps')
 end
 
 %% LOAD VOLTAGE SIGNAL
-
 %loads in (high-pass filtered) voltage signal
-if isstr(sfile)
+if ischar(sfile)
     [V,Vtime,Fs] = Load_FullV(sfile, params.add_Vmean, params.filt_cutoff,use_chs);
 else
     V = sfile.V(:,use_chs);
@@ -84,6 +95,7 @@ else
     target_Nspks = params.target_rate*length(V)/Fs;
 end
 
+%determine channel from which to trigger spikes
 if length(use_chs) == 1
     trig_ch = 1;
 elseif length(use_chs) == 2
@@ -96,7 +108,7 @@ else
     trig_ch = 2;
 end
 
-[spk_id, trig_thresh,noise_sigma] = triggerSpikes(V(:,trig_ch),params.thresh_sign,target_Nspks);
+[spk_id, trig_thresh,noise_sigma] = triggerSpikes(V(:,trig_ch),params.thresh_sign,target_Nspks);%trigger spikes from trig_ch
 
 %check if identified trigger threshold is too high above the estimated
 %noise level. If so, lower threshold and retrigger
@@ -111,7 +123,7 @@ spk_id(spk_id <= abs(params.spk_pts(1)) | spk_id >= length(V)-params.spk_pts(end
 Spikes = getSpikeSnippets(V,Vtime,spk_id,params.spk_pts,trig_ch);
 
 % artifact detection
-artifact_ids = find_spike_artifacts(Spikes,params);
+artifact_ids = find_spike_artifacts(Spikes);
 Spikes.V(artifact_ids,:,:) = [];
 Spikes.times(artifact_ids) = [];
 Spikes.trig_vals(artifact_ids) = [];
@@ -120,11 +132,13 @@ if params.verbose > 0
     fprintf('Removed %d potential artifacts\n',length(artifact_ids));
 end
 
-exclude_spks = find(ismember(spk_id,exclude_spk_inds));
+%save data for ALL spikes
 all_Spikes = Spikes;
 all_spk_id = spk_id;
 all_times = Spikes.times;
 
+%exclude desired spikes
+exclude_spks = find(ismember(spk_id,exclude_spk_inds)); %find set of excluded spikes
 Spikes.V(exclude_spks,:,:) = [];
 Spikes.times(exclude_spks) = [];
 Spikes.trig_vals(exclude_spks) = [];
@@ -143,6 +157,7 @@ clusterDetails.use_chs = use_chs;
 clusterDetails.recDur = length(V)/Fs;
 clusterDetails.params = params;
 clusterDetails.times = Spikes.times;
+clusterDetails.Fs = Fs;
 clusterDetails.spk_inds = spk_id(:);
 
 clusterDetails = compute_cluster_stats(clusterDetails,Spikes,spike_features);
@@ -159,36 +174,13 @@ if clusterDetails.iso_dists(1) > 2
         [back_GMM, back_dist,back_comp_idx,back_clust_labels,back_cluster_stats] = ...
             GMM_fit(Spikes.V(cur_back_spikes,:),spike_features(cur_back_spikes,:),2,params);
         if isobject(back_GMM)
-            cur_n_back_comps = 1;
-            while cur_n_back_comps < params.max_back_comps
-                cur_n_back_comps = cur_n_back_comps + 1;
-                fprintf('Trying background split %d of %d\n',cur_n_back_comps,params.max_back_comps);
-                
-                [temp_spike_xy,temp_xyproj_mat] = Project_GMMfeatures(spike_features(cur_back_spikes,:), back_GMM,back_clust_labels);
-                %implement a sign convention that positive values of the first dimension
-                %correspond to higher spike amplitudes
-                bb = corr(temp_spike_xy(:,1),abs(Spikes.trig_vals(cur_back_spikes)));
-                if bb < 0
-                    temp_spike_xy(:,1) = -temp_spike_xy(:,1);
-                    temp_xyproj_mat(:,1) = -temp_xyproj_mat(:,1);
-                end
-                [newback_GMM_obj, newback_distance,newback_comp_idx, newback_clust_labels] = ...
-                    try_backgnd_splitting(back_GMM,Spikes.V(cur_back_spikes,:),spike_features(cur_back_spikes,:),...
-                    temp_spike_xy,temp_xyproj_mat,back_comp_idx,back_clust_labels,params);
-                
-                fprintf('Orig: %.3f New: %.3f \n',back_dist,newback_distance);
-                if newback_distance > back_dist
-                    back_GMM = newback_GMM_obj;
-                    back_dist = newback_distance;
-                    back_comp_idx = newback_comp_idx;
-                    back_clust_labels = newback_clust_labels;
-                end
+            if params.max_back_comps > 1 %try adding additional components to model background spikes
+                back_Spikes.trig_vals = Spikes.trig_vals(cur_back_spikes,:);
+                back_Spikes.V = Spikes.V(cur_back_spikes,:,:);
+                [back_GMM,back_dist,back_comp_idx,back_clust_labels] = add_background_comps(...
+                    back_Spikes,spike_features(cur_back_spikes,:),back_GMM,back_dist,back_clust_labels,back_comp_idx,params);
             end
-            
-            %             init_comp_idx = clusterDetails.comp_idx;
-            %             init_comp_idx = init_comp_idx + length(back_clust_labels);
-            %             init_comp_idx(cur_back_spikes) = back_comp_idx;
-            
+                        
             init_comp_idx = clusterDetails.comp_idx;
             uids = init_comp_idx <= 0;
             buids = back_comp_idx <= 0;
@@ -203,7 +195,7 @@ if clusterDetails.iso_dists(1) > 2
             
             n_comps = length(init_cluster_labels);
             [back_GMM, back_dist,back_comp_idx,back_clust_labels,back_cluster_stats] = ...
-                GMM_fit(Spikes.V,spike_features,n_comps,params,[],init_comp_idx,init_cluster_labels);
+                GMM_fit(Spikes.V,spike_features,n_comps,params,init_comp_idx,init_cluster_labels);
             
             [new_Lratio,new_iso_dist] = compute_cluster_Lratio(spike_features,back_GMM,back_comp_idx,back_clust_labels);
             n_good_SUs = sum(new_iso_dist > 2 & new_Lratio < 1e3);
@@ -222,6 +214,7 @@ if clusterDetails.iso_dists(1) > 2
 end
 
 %% NOW COMPUTE ISOLATION MEASURES WITH RESPECT TO ALL SPIKES
+%get all spike features
 if strcmp(clusterDetails.fin_space,'PC')
     if N_chs > 1
         AllV = reshape(all_Spikes.V,length(all_Spikes.times),N_samps*N_chs);
@@ -244,18 +237,14 @@ elseif strcmp(clusterDetails.fin_space,'template')
     templates = clusterDetails.templates;
     n_templates = size(templates,2);
     all_spike_features = get_template_scores(all_Spikes.V,clusterDetails.templates,clusterDetails.template_params);
-    
 else
     error('Unrecognized feature space');
 end
-
-% all_spike_features =
-[Lratios,iso_distance] = compute_cluster_Lratio(all_spike_features,clusterDetails.gmm_fit,clusterDetails.comp_idx,clusterDetails.cluster_labels)
-clusterDetails.Lratios = Lratios;
-clusterDetails.iso_dists = iso_distance;
+[clusterDetails.Lratios,clusterDetails.iso_distance] = compute_cluster_Lratio(all_spike_features,clusterDetails.gmm_fit,clusterDetails.comp_idx,clusterDetails.cluster_labels)
 
 all_spike_xy = all_spike_features*clusterDetails.xy_projmat;
 
+%make excluded spikes -1
 included_spikes = setdiff(1:length(all_spk_id),exclude_spks);
 all_comp_idx = -1*ones(length(all_spk_id),1);
 all_comp_idx(included_spikes) = clusterDetails.comp_idx;

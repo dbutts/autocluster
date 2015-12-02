@@ -73,46 +73,25 @@ if ismember(1,params.try_features)
     n_comps = 2; %number of Gaussian components
     
     %pick set of PCs to use
+    %OLD VERSION USES LILLIE TEST OF GAUSSIANITY TO SELECT PC_SCORES. I FOUND JUST USING THE FIRST N
+    %WORKS AS WELL.
 %     pc_ks = nan(D,1);
 %     for ii = 1:D
 %         pc_ks(ii) = lillie_KSstat(pc_scores(:,ii));
 %     end
 %     [~,use_pcs] = sort(pc_ks,'descend');
 %     use_pcs = use_pcs(1:params.n_pcs);
-     use_pcs = 1:params.n_pcs;
+     use_pcs = 1:params.n_pcs; %just take the first n_pcs
    
      %fit initial model and store results as first element of results arrays
     [GMM_obj{1}, distance(1),all_comp_idx(:,1),all_clust_labels{1},cluster_stats] = ...
-        GMM_fit(Spikes.V,pc_scores(:,use_pcs),n_comps,params,n_comps);
+        GMM_fit(Spikes.V,pc_scores(:,use_pcs),n_comps,params);
     if isobject(GMM_obj{1}) %if fit worked
-        LL(1) = GMM_obj{1}.NlogL;
+        LL(1) = GMM_obj{1}.NlogL; %negative LL of fit
         
-        new_GMM_obj = GMM_obj{1};
-        new_comp_idx = all_comp_idx(:,1);
-        new_clust_labels = all_clust_labels{1};
-        cur_n_back_comps = 1;
-        while cur_n_back_comps < params.max_back_comps
-            cur_n_back_comps = cur_n_back_comps + 1;
-            fprintf('Trying background split %d of %d\n',cur_n_back_comps,params.max_back_comps);
-            
-            [spike_xy,xyproj_mat] = Project_GMMfeatures(pc_scores(:,use_pcs), new_GMM_obj,new_clust_labels);
-            %implement a sign convention that positive values of the first dimension
-            %correspond to higher spike amplitudes
-            bb = corr(spike_xy(:,1),abs(Spikes.trig_vals(:)));
-            if bb < 0
-                spike_xy(:,1) = -spike_xy(:,1);
-                xyproj_mat(:,1) = -xyproj_mat(:,1);
-            end
-            [new_GMM_obj, new_distance,new_comp_idx, new_clust_labels] = ...
-                try_backgnd_splitting(new_GMM_obj,Spikes.V,pc_scores(:,use_pcs),spike_xy,xyproj_mat,new_comp_idx,new_clust_labels,params);
-           
-            fprintf('Orig: %.3f New: %.3f \n',distance(1),new_distance);
-            if new_distance > distance(1)
-                GMM_obj{1} = new_GMM_obj;
-                distance(1) = new_distance;
-                all_comp_idx(:,1) = new_comp_idx;
-                all_clust_labels{1} = new_clust_labels;
-            end
+        if params.max_back_comps > 1 %try adding additional components to model background spikes
+            [GMM_obj{1},distance(1),all_comp_idx(:,1),all_clust_labels{1}] = add_background_comps(...
+                Spikes,pc_scores(:,use_pcs),GMM_obj{1},distance(1),all_clust_labels{1},all_comp_idx(:,1),params);
         end
     else
         LL(1) = nan;
@@ -135,7 +114,7 @@ if ismember(1,params.try_features)
         peakloc = find(peak_amps == max(peak_amps(:)));
         [best_ch,best_clust] = ind2sub([N_chs 2],peakloc);
     end
-    spk_wvfrm = squeeze(cluster_means(:,best_ch,best_clust));
+    spk_wvfrm = squeeze(cluster_means(:,best_ch,best_clust)); %get spike waveform on best channel
     [~,minloc] = min(spk_wvfrm);
     [~,maxloc] = max(spk_wvfrm);
     first_peak = min([minloc maxloc]);
@@ -151,18 +130,21 @@ else
 end
 %% INITIAL CLUSTERING IN VOLTAGE SPACE
 if ismember(2,params.try_features)
+    
+    %compute non-gaussianity of spike dist at each time sample, and find samples with most
+    %non-gauss dists
     tdim_ks = nan(D*N_chs,1);
     for ii = 1:D*N_chs
-        tdim_ks(ii) = lillie_KSstat(AllV(:,ii));
+        tdim_ks(ii) = lillie_KSstat(AllV(:,ii)); %compute KS-stat to measure non-gaussianity of spike dist at each time/channel
     end
-    peak_locs = find(diff(sign(diff(tdim_ks))) < 0);
-    if ~isempty(peak_locs)
-        peak_locs = peak_locs + 1;
-        peak_amps = tdim_ks(peak_locs);
-        [~,use_peaks] = sort(peak_amps,'descend');
-        peak_locs = peak_locs(use_peaks);
+    peak_locs = find(diff(sign(diff(tdim_ks))) < 0); %detect local maxima
+    if ~isempty(peak_locs) 
+        peak_locs = peak_locs + 1; %align with local max
+        peak_amps = tdim_ks(peak_locs); %compute KS at local max
+        [~,use_peaks] = sort(peak_amps,'descend'); 
+        peak_locs = peak_locs(use_peaks); %sort 
         if length(peak_locs) > params.n_tdims
-            peak_locs = peak_locs(1:params.n_tdims);
+            peak_locs = peak_locs(1:params.n_tdims); %take the first n_tdims peaks
         end
     else
         peak_locs = [first_peak second_peak round((second_peak+first_peak)/2) second_peak + round((second_peak-first_peak)/2)];
@@ -172,38 +154,13 @@ if ismember(2,params.try_features)
     
     n_comps = 2;
     [GMM_obj{2}, distance(2),all_comp_idx(:,2),all_clust_labels{2}] = ...
-        GMM_fit(Spikes.V,AllV(:,use_tdims),n_comps,params,n_comps);
+        GMM_fit(Spikes.V,AllV(:,use_tdims),n_comps,params); %fit model using voltage samples
     if isobject(GMM_obj{2})
         LL(2) = GMM_obj{2}.NlogL;
-        
-        new_GMM_obj = GMM_obj{2};
-        new_comp_idx = all_comp_idx(:,2);
-        new_clust_labels = all_clust_labels{2};
-        cur_n_back_comps = 1;
-        while cur_n_back_comps < params.max_back_comps
-            cur_n_back_comps = cur_n_back_comps + 1;
-            fprintf('Trying background split %d of %d\n',cur_n_back_comps,params.max_back_comps);
-            
-            [spike_xy,xyproj_mat] = Project_GMMfeatures(AllV(:,use_tdims), new_GMM_obj,new_clust_labels);
-            %implement a sign convention that positive values of the first dimension
-            %correspond to higher spike amplitudes
-            bb = corr(spike_xy(:,1),abs(Spikes.trig_vals(:)));
-            if bb < 0
-                spike_xy(:,1) = -spike_xy(:,1);
-                xyproj_mat(:,1) = -xyproj_mat(:,1);
-            end
-            [new_GMM_obj, new_distance,new_comp_idx, new_clust_labels] = ...
-                try_backgnd_splitting(new_GMM_obj,Spikes.V,AllV(:,use_tdims),spike_xy,xyproj_mat,new_comp_idx,new_clust_labels,params);
-            
-            fprintf('Orig: %.3f New: %.3f \n',distance(2),new_distance);
-            if new_distance > distance(2)
-                GMM_obj{2} = new_GMM_obj;
-                distance(2) = new_distance;
-                all_comp_idx(:,2) = new_comp_idx;
-                all_clust_labels{2} = new_clust_labels;
-            end
-        end
-        
+        if params.max_back_comps > 1 %try adding additional components to model background spikes
+            [GMM_obj{2},distance(2),all_comp_idx(:,2),all_clust_labels{2}] = add_background_comps(...
+                Spikes,AllV(:,use_tdims),GMM_obj{2},distance(2),all_clust_labels{2},all_comp_idx(:,2),params);
+        end        
     else
         LL(2) = nan;
     end
@@ -217,7 +174,7 @@ if ismember(2,params.try_features)
     if params.verbose > 0
         fprintf('Voltage d-prime: %.4f\n',distance(2));
     end
-clusterDetails.tdims = use_tdims;
+    clusterDetails.tdims = use_tdims;
 else
     LL(2) = nan;
     distance(2) = nan;
@@ -231,37 +188,14 @@ if ismember(3,params.try_features)
     
     n_comps = 2;
     [GMM_obj{3}, distance(3),all_comp_idx(:,3),all_clust_labels{3}] = ...
-        GMM_fit(Spikes.V,energy_features,n_comps,params,n_comps);
+        GMM_fit(Spikes.V,energy_features,n_comps,params);
     if isobject(GMM_obj{3})
         LL(3) = GMM_obj{3}.NlogL;
         
-        new_GMM_obj = GMM_obj{3};
-        new_comp_idx = all_comp_idx(:,3);
-        new_clust_labels = all_clust_labels{3};
-        cur_n_back_comps = 1;
-        while cur_n_back_comps < params.max_back_comps
-            cur_n_back_comps = cur_n_back_comps + 1;
-            fprintf('Trying background split %d of %d\n',cur_n_back_comps,params.max_back_comps);
-            
-            [spike_xy,xyproj_mat] = Project_GMMfeatures(energy_features, new_GMM_obj,new_clust_labels);
-            %implement a sign convention that positive values of the first dimension
-            %correspond to higher spike amplitudes
-            bb = corr(spike_xy(:,1),abs(Spikes.trig_vals(:)));
-            if bb < 0
-                spike_xy(:,1) = -spike_xy(:,1);
-                xyproj_mat(:,1) = -xyproj_mat(:,1);
-            end
-            [new_GMM_obj, new_distance,new_comp_idx, new_clust_labels] = ...
-                try_backgnd_splitting(new_GMM_obj,Spikes.V,energy_features,spike_xy,xyproj_mat,new_comp_idx,new_clust_labels,params);
-            
-            fprintf('Orig: %.3f New: %.3f \n',distance(3),new_distance);
-            if new_distance > distance(3)
-                GMM_obj{3} = new_GMM_obj;
-                distance(3) = new_distance;
-                all_comp_idx(:,3) = new_comp_idx;
-                all_clust_labels{3} = new_clust_labels;
-            end            
-        end
+        if params.max_back_comps > 1 %try adding additional components to model background spikes
+            [GMM_obj{3},distance(3),all_comp_idx(:,3),all_clust_labels{3}] = add_background_comps(...
+                Spikes,energy_features,GMM_obj{3},distance(3),all_clust_labels{3},all_comp_idx(:,3),params);
+        end        
     else
         LL(3) = nan;
     end
@@ -278,19 +212,6 @@ else
     LL(3) = nan;
     distance(3) = nan;
 end
-%% INITIAL CLUSTERING IN PC-ENERGY SPACE
-% 
-% n_comps = 2;
-% [GMM_obj{4}, distance(4),all_comp_idx(:,4),all_clust_labels{4}] = ...
-%     GMM_fit(Spikes.V,[pc_scores(:,1:2) spike_energy spike_dt_energy],n_comps,params,n_comps);
-% if isobject(GMM_obj{4})
-% LL(4) = GMM_obj{4}.NlogL;
-% else
-%     LL(4) = nan;
-% end
-% if params.verbose > 0
-%     fprintf('PC-Energy d-prime: %.4f\n',distance(4));
-% end
 
 %% CHOOSE BEST INITIAL CLUSTERING
 [d, best] = max(distance); %best clustering so far
@@ -305,6 +226,8 @@ if params.verbose > 0
       fprintf('Using PC initial clustering\n'); 
    elseif best == 2
       fprintf('Using Voltage initial clustering\n'); 
+   elseif best == 3
+      fprintf('Using Energy initial clustering\n'); 
    end
 end
 
@@ -344,7 +267,7 @@ if template_distance > init_distance
     cluster_labels = template_cluster_labels;
     comp_idx = template_comp_idx;
     clusterDetails.fin_space = 'template';
-else
+else %otherwise ues the best from the fixed-feature set
     gmm_fit = GMM_obj{best};
     cluster_labels = init_cluster_labels;
     comp_idx = init_comp_idx;    
@@ -369,7 +292,7 @@ clusterDetails.template_params = template_params;
 clusterDetails.templates = templates;
 
 %% IMPLEMENT BIASED CLUSTERING
-if params.cluster_bias ~= 0.5
+if params.cluster_bias ~= 0.5 %if we have a non-equal prior for assignment of spike clusters
     if params.verbose > 0
        fprintf('Performing biased clustering\n'); 
     end
@@ -382,31 +305,6 @@ clusterDetails.mean_spike = cluster_stats.mean_spike;
 clusterDetails.std_spike = cluster_stats.std_spike;
 clusterDetails.comp_idx = int16(comp_idx);
 clusterDetails.cluster_labels = cluster_labels;
-
-%% CREATE 2d PROJECTION OF FEATURES 
-[spike_xy,xyproj_mat] = Project_GMMfeatures(spike_features, gmm_fit,cluster_labels);
-
-%implement a sign convention that positive values of the first dimension
-%correspond to higher spike amplitudes
-bb = corr(spike_xy(:,1),abs(Spikes.trig_vals(:)));
-if bb < 0
-    spike_xy(:,1) = -spike_xy(:,1);
-    xyproj_mat(:,1) = -xyproj_mat(:,1);
-end
-
-clusterDetails.xy_projmat = xyproj_mat;
-clusterDetails.spike_xy = spike_xy;
-
-%compute GMM model parameters projected into XY space. Useful for plotting
-%gaussian components
-gmm_xyMeans = gmm_fit.mu*xyproj_mat;
-for ii = 1:size(gmm_fit.Sigma,3)
-    gmm_xySigma(:,:,ii) = xyproj_mat' * squeeze(gmm_fit.Sigma(:,:,ii)) * xyproj_mat;
-end
-clusterDetails.gmm_xyMeans = gmm_xyMeans;
-clusterDetails.gmm_xySigma = gmm_xySigma;
-
-%%
 clusterDetails.gmm_fit = gmm_fit;
 if isobject(gmm_fit)
     clusterDetails.failed = 0;
@@ -415,3 +313,22 @@ else
     clusterDetails.failed = 1;
     clusterDetails.Ncomps = nan;
 end
+
+%% CREATE 2d PROJECTION OF FEATURES 
+[spike_xy,xyproj_mat] = Project_GMMfeatures(spike_features, gmm_fit,cluster_labels);
+[spike_xy,xyproj_mat] = enforce_spikexy_convention(Spikes,spike_xy,xyproj_mat);
+
+clusterDetails.xy_projmat = xyproj_mat;
+clusterDetails.spike_xy = spike_xy;
+
+%compute GMM model parameters projected into XY space. Useful for plotting
+%gaussian components
+gmm_xyMeans = gmm_fit.mu*xyproj_mat;
+gmm_xySigma = nan(2,2,size(gmm_fit.Sigma,3));
+for ii = 1:size(gmm_fit.Sigma,3)
+    gmm_xySigma(:,:,ii) = xyproj_mat' * squeeze(gmm_fit.Sigma(:,:,ii)) * xyproj_mat;
+end
+clusterDetails.gmm_xyMeans = gmm_xyMeans;
+clusterDetails.gmm_xySigma = gmm_xySigma;
+
+

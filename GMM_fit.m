@@ -122,7 +122,7 @@ else
     
     %% TRY FITTING WITH PREDEFINED INIT
     %sets the initial component means to be separated along the first PC. If 3
-    %clusters seperates the 3rd along the 2nd PC. Initializes the component
+    %clusters, seperates the 3rd along the 2nd PC. Initializes the component
     %covariances to all be some fraction of the full covariance of X
     
     if size(X,2) > 1
@@ -148,7 +148,6 @@ else
         clust_labels{2} = 1:n_comps;
         if isobject(Gs{2})
             comp_idx = cluster(Gs{2},X);
-%         ds(2) = gmm_sample_dprime(X,comp_idx,clust_labels{2});
         else
             comp_idx = nan;
             fail(2) = 1;
@@ -163,7 +162,6 @@ else
     clust_labels{3} = 1:n_comps;
     if isobject(Gs{3})
         comp_idx = cluster(Gs{3},X);
-%         ds(3) = gmm_sample_dprime(X,comp_idx,clust_labels{3});
     else
         comp_idx = nan;
         fail(3) = 1;
@@ -182,25 +180,25 @@ if all(fail == 1)
     outliers = [];
     return;
 end
-[gmm_distance,best] = max(ds);
+[gmm_distance,best] = max(ds); %pick clustering with largest cluster sep
 gmm_obj = Gs{best};
 cluster_labels = clust_labels{best};
+
 %% CHECK FOR OUTLIERS
 if ~isnan(params.outlier_thresh) && isobject(gmm_obj)
     use_nclusts = size(gmm_obj.mu,1);
     [idx,nlogl,P,logpdf,M] = cluster(gmm_obj,X);
-    min_mah_dists = sqrt(min(M,[],2));
-    outliers = find(min_mah_dists > params.outlier_thresh);
-    use_idx = setdiff(1:size(X,1),outliers);
+    min_mah_dists = sqrt(min(M,[],2)); %smallest mahalanobis distance for each spike to any cluster
+    outliers = find(min_mah_dists > params.outlier_thresh); 
+    use_idx = setdiff(1:size(X,1),outliers); %non-outlier spikes
     S.mu = gmm_obj.mu; S.Sigma = gmm_obj.Sigma;
-    new_gmm_obj = fit_GMM(X(use_idx,:),use_nclusts,'Start',S,'Regularize',params.reg_lambda);
+    new_gmm_obj = fit_GMM(X(use_idx,:),use_nclusts,'Start',S,'Regularize',params.reg_lambda); %refit models excluding outliers
     if isobject(new_gmm_obj)
         gmm_obj = new_gmm_obj;
     end
     gmm_distance = gmm_dprime(gmm_obj,cluster_labels);
     comp_idx = cluster(gmm_obj,X);
     comp_idx(outliers) = -1;
-%     gmm_distance = gmm_sample_dprime(X,comp_idx,cluster_labels);
 else
     if isobject(gmm_obj)
         comp_idx = cluster(gmm_obj,X);
@@ -216,14 +214,10 @@ if isobject(gmm_obj)
         gmm_distance = nan;
     end
     
-    [cluster_labels,cluster_stats] = relabel_clusters(SpikeV,comp_idx,cluster_labels);
+    [cluster_labels,cluster_stats] = relabel_clusters(SpikeV,comp_idx,cluster_labels);%re-order clusters based on amp of avg waveform
 else
     
     gmm_distance = nan;
     cluster_labels = nan;
     cluster_stats = nan;
 end
-% if isobject(gmm_obj)
-%     [Lratio,iso_distance] = compute_cluster_Lratio(X,gmm_obj,comp_idx,cluster_labels);
-%     gmm_distance = mean(iso_distance);
-% end

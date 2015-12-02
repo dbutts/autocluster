@@ -1,8 +1,25 @@
 function [new_cluster,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,init_cluster,params,fixed,Spikes,spike_features)
+% [new_cluster,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,init_cluster,<params>,<fixed>,<Spikes>,<spike_features>)
+% Apply GMM clustering model to new spike data
+% INPUTS: 
+%   loadedData: data file. Either filename, or struct containing voltage, timestamp, and Fs 
+%   init_cluster: clusterDetails struct
+%   params: clustering params struct
+%   fixed: indicator to specify what the function should do (this should be changed to be more transparent)
+%       Set fixed == -1 to retriger spikes but dont fit new GMM (not fully implemented yet?)
+%       Set fixed == 0 to fit new GMM with input gmm used for initialization. 
+%       Set fixed == 1 to just grab spike features.
+%       Set fixed == 2 if you want to keep the model the same but recompute cluster stats, etc.
+%       Default is 0
+%   Spikes: struct of spike data, if precalculated
+%   spike_features: array of spike features if precalculated
+% OUTPUTS:
+%   new_cluster: new clusterDetails struct
+%   spike_features: array of spike features
+%   spike_xy: XYprojection of spike data
+%   Spikes: struct of spike data
 
-%set fixed == 0 to fit new GMM with input as initialization. Set fixed == 1
-%to just grab spike features, and set fixed == 2 if you want to keep the
-%model the same but recompute cluster stats, etc.
+%% defaults
 if nargin < 3 || isempty(params)
     params = init_cluster.params;
 end
@@ -18,9 +35,9 @@ end
 new_cluster = init_cluster;
 
 %% LOAD VOLTAGE SIGNAL AND DETECT SPIKES
-if isempty(Spikes)
+if isempty(Spikes) %if spike data isn't provided
     %loads in (high-pass filtered) voltage signal
-    if isstr(loadedData)
+    if ischar(loadedData)
         [V,Vtime,Fs] = Load_FullV(loadedData, params.add_Vmean, params.filt_cutoff,new_cluster.use_chs);
     else
         V = loadedData.V(:,new_cluster.use_chs);
@@ -46,11 +63,11 @@ if isempty(Spikes)
     Spikes = getSpikeSnippets(V,Vtime,spk_id,params.spk_pts,new_cluster.trig_ch);
     
     % artifact detection
-    artifact_ids = find_spike_artifacts(Spikes,params);
+    artifact_ids = find_spike_artifacts(Spikes);
     Spikes.V(artifact_ids,:,:) = [];
     Spikes.times(artifact_ids) = [];
     Spikes.trig_vals(artifact_ids) = [];
-    spk_id(artifact_ids) = []; %bug fix 12/17/2013
+    spk_id(artifact_ids) = []; 
     Spikes.spk_inds = spk_id(:);
     if params.verbose > 0
         fprintf('Removed %d potential artifacts\n',length(artifact_ids));
@@ -67,7 +84,7 @@ end
 
 [N_spks, N_samps, N_chs] = size(Spikes.V);
 
-%%
+%% get desired spike features
 if isempty(spike_features)
     if strcmp(new_cluster.fin_space,'PC')
         if N_chs > 1
@@ -98,40 +115,42 @@ end
 spike_xy = spike_features*init_cluster.xy_projmat;
 new_cluster.spike_xy = spike_xy;
 
-uids = new_cluster.comp_idx > 0;
+%% apply cluster model
+uids = new_cluster.comp_idx > 0; %non outlier spikes
+
+%get cluster assignments
 spike_clusts = int16(nan(size(new_cluster.comp_idx)));
 spike_clusts(uids) = (new_cluster.cluster_labels(new_cluster.comp_idx(uids)));
 new_cluster.spike_clusts = spike_clusts(:);
 
-% new_cluster = compute_cluster_stats(new_cluster,Spikes,spike_features);
-
-if fixed == 0
+if fixed == 0 %if we want to cluster new data
+    
+    init_comp_idx = cluster(new_cluster.gmm_fit,spike_features); %apply cluster model to new spike features
+    %detect outliers
     mah = sqrt(mahal(new_cluster.gmm_fit,spike_features));
     best_mah = min(mah,[],2);
     outliers = find(best_mah > new_cluster.params.outlier_thresh);
-    init_comp_idx = cluster(new_cluster.gmm_fit,spike_features);
     init_comp_idx(outliers) = -1;
     
-    %     %if any components have no assigned spikes, remove them
     init_cluster_labels = new_cluster.cluster_labels;
+
+    %if any components have no assigned spikes, remove them
     N_initial_clusts = length(unique(init_cluster_labels));
     n = hist(init_comp_idx,1:length(init_cluster_labels));
     init_cluster_labels(n==0) = [];
     if length(unique(init_comp_idx(init_comp_idx > 0))) < 2 %if there is only one cluster apparent in the data try random inits
         gmm_obj = nan;
-    else
+    else %use initial clustering to initialize new GMM model
         [gmm_obj, gmm_distance, clust_ids, cluster_labels, cluster_stats, outliers] = ...
-            GMM_fit(Spikes.V, spike_features, [], new_cluster.params,...
-            [],init_comp_idx,init_cluster_labels);
+            GMM_fit(Spikes.V, spike_features, [], new_cluster.params,init_comp_idx,init_cluster_labels);
     end
     
     %if fixed initialization fails try random initialization
     if ~isobject(gmm_obj)
         fprintf('Fixed-initialization failed, trying random initialziation\n');
         [gmm_obj, gmm_distance, clust_ids, cluster_labels, cluster_stats, outliers] = ...
-            GMM_fit(Spikes.V, spike_features, length(unique(new_cluster.cluster_labels)), new_cluster.params,length(new_cluster.cluster_labels));
+            GMM_fit(Spikes.V, spike_features, length(unique(new_cluster.cluster_labels)), new_cluster.params);
         if ~isobject(gmm_obj)
-            %         new_cluster = init_cluster;
             new_cluster.spike_clusts = ones(size(new_cluster.times));
             new_cluster.comp_idx = nan(size(new_cluster.times));
             new_cluster.failed = 1;
@@ -159,60 +178,18 @@ if fixed == 0
         new_cluster.dprime = nan;
     end
 end
-if fixed ~= 1    %%
-    if fixed == 0
+
+%% compute stats on new clustering
+if fixed ~= 1    
+    if fixed == 0 %if its a new model fit, relabel clusters
         [cluster_labels, cluster_stats] = relabel_clusters(Spikes.V,new_cluster.comp_idx,new_cluster.cluster_labels);
         new_cluster.cluster_labels = cluster_labels;
-    elseif fixed == 2
+    elseif ismember(fixed,[-1,2])
         orig_n_clusts = size(init_cluster.mean_spike,2);
         new_n_clusts = length(unique(init_cluster.cluster_labels));
         n_null_clusts = orig_n_clusts - new_n_clusts;
-        [cluster_stats] = get_cluster_stats(Spikes.V,new_cluster.spike_clusts);
     else
         error('Unsupported option for input fixed');
     end
-    new_cluster.mean_spike = cluster_stats.mean_spike;
-    new_cluster.std_spike = cluster_stats.std_spike;
-    
-    uids = new_cluster.comp_idx > 0;
-    spike_clusts = int16(nan(size(new_cluster.comp_idx)));
-    spike_clusts(uids) = (new_cluster.cluster_labels(new_cluster.comp_idx(uids)));
-    new_cluster.spike_clusts = spike_clusts(:);
-    
-    %     mu_inds = setdiff(1:N_spks,su_inds);
-    mu_inds = find(spike_clusts == 1);
-    new_cluster.n_spks(1) = length(mu_inds);
-    N_sus = nanmax(new_cluster.cluster_labels) - 1;
-    for ss = 1:N_sus
-        su_inds = find(spike_clusts == ss + 1);
-        %         su_inds = find(ismember(clust_ids,find(cluster_labels == 2)));
-        %get ISIs
-        su_spk_times = Spikes.times(su_inds);
-        isis = diff(su_spk_times)*1e3; %in ms
-        new_cluster.n_spks(ss+1) = length(su_inds);
-        
-        %two different measures of refractoriness
-        refractoriness(1) = sum(isis < 1)/length(isis)*100;
-        refractoriness(2) = sum(isis < 2)/length(isis)*100;
-        new_cluster.refract(ss,:) = refractoriness;
-    end
-    
-    %compute GMM model parameters projected into XY space
-    gmm_xyMeans = new_cluster.gmm_fit.mu*init_cluster.xy_projmat;
-    for ii = 1:size(gmm_xyMeans,1)
-        gmm_xySigma(:,:,ii) = init_cluster.xy_projmat' * squeeze(new_cluster.gmm_fit.Sigma(:,:,ii)) * init_cluster.xy_projmat;
-    end
-    if n_null_clusts > 0
-        gmm_xyMeans = cat(1,gmm_xyMeans,nan(n_null_clusts,2));
-        gmm_xySigma = cat(3,gmm_xySigma,nan(2,2,n_null_clusts));
-    end
-    
-    new_cluster.gmm_xyMeans = gmm_xyMeans;
-    new_cluster.gmm_xySigma = gmm_xySigma;
-    
-    %%
     new_cluster = compute_cluster_stats(new_cluster,Spikes,spike_features,n_null_clusts);
-    
-    [new_cluster.Lratios,new_cluster.iso_dists] = compute_cluster_Lratio(spike_features,new_cluster.gmm_fit,new_cluster.comp_idx,new_cluster.cluster_labels);
-    
 end

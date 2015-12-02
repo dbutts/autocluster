@@ -1,4 +1,6 @@
 function KSstat = lillie_KSstat(x)
+% KSstat = lillie_KSstat(x)
+% Computes the KS statistic of empirical dist of x from a gaussian with the same mean and SD
 
 outlier_thresh = 3;
 used_samps = find(abs(zscore(x)) < outlier_thresh);

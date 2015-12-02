@@ -1,30 +1,43 @@
-function [] = cycle_projections(block_num,probe_num)
-
+function [] = cycle_projections(block_num,probe_num,precomp_spike_data)
+% [] = cycle_projections(block_num,probe_num)
+% cycles through all possible projections in feature space
+% INPUTS: 
+%   block_num
+%   probe_num
+%   <precomp_spike_data>: file name of precomputed data
+%%
 global data_dir base_save_dir init_save_dir Expt_name Vloaded n_probes loadedData raw_block_nums
 
 fprintf('Loading block %d Clusters\n',block_num);
 cur_clust_data = [base_save_dir sprintf('/Block%d_Clusters.mat',block_num)];
 load(cur_clust_data,'Clusters');
-
-if Expt_name(1) == 'G'
-    loadedData = [data_dir sprintf('/Expt%d.p%dFullV.mat',raw_block_nums(block_num),probe_num)];
-else
-    sfile_name = [data_dir sprintf('/Expt%dFullV.mat',raw_block_nums(block_num))];
-    if Vloaded ~= raw_block_nums(block_num)
-        fprintf('Loading data file %s\n',sfile_name);
-        [loadedData.V,loadedData.Vtime,loadedData.Fs] = Load_FullV(sfile_name, false, [100 nan],1:n_probes);
-        Vloaded = raw_block_nums(block_num);
-    end
-end
 params = Clusters{probe_num}.params;
 
-[~,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,Clusters{probe_num},Clusters{probe_num}.params,1);
+if ~isempty(precomp_spike_data) %if precomputed data file is specified load spike data from there
+    loadedData = [];
+    Vloaded = nan;
+    Spikes = load_spike_data(precomp_spike_data);
+    fixed = 1;
+    [~,spike_features,spike_xy] = apply_clustering(loadedData,cur_cluster,[],fixed,Spikes);
+else %otherwise retrigger spikes
+    if Expt_name(1) == 'G'
+        loadedData = [data_dir sprintf('/Expt%d.p%dFullV.mat',raw_block_nums(block_num),probe_num)];
+    else
+        sfile_name = [data_dir sprintf('/Expt%dFullV.mat',raw_block_nums(block_num))];
+        if Vloaded ~= raw_block_nums(block_num)
+            fprintf('Loading data file %s\n',sfile_name);
+            [loadedData.V,loadedData.Vtime,loadedData.Fs] = Load_FullV(sfile_name, false, [100 nan],1:n_probes);
+            Vloaded = raw_block_nums(block_num);
+        end
+    end
+    fixed = 1;
+    [~,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,Clusters{probe_num},Clusters{probe_num}.params,fixed);
+end
 
-cluster_labels = Clusters{probe_num}.cluster_labels;
-%%
 [N_spks,N_samps,N_chs] = size(Spikes.V);
-Fs = 3e4;
 
+%% First visualize in XY space
+cluster_labels = Clusters{probe_num}.cluster_labels;
 spike_labels = Clusters{probe_num}.spike_clusts;
 uids = find(Clusters{probe_num}.comp_idx > 0);
 mu_inds = find(spike_labels == 1);
@@ -74,7 +87,7 @@ xlim(xrange); ylim(yrange);
 
 pause
 
-%%
+%% now cycle through all spike feature projections
 N_features = size(spike_features,2);
 N_projs = N_features*(N_features-1)/2;
 for kk = 1:N_features-1

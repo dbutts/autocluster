@@ -1,10 +1,15 @@
 function cmap = cluster_cmap(n_colors)
+% cmap = cluster_cmap(n_colors)
+% defalut set colormap for displaying clusters
 
-cmap(5,:) = [33 64 154]; %darkblue
+if n_colors > 9
+    error('Dont have that many colors specified yet');
+end
 cmap(1,:) = [8 135 67]; %darkgreen
 cmap(2,:) = [241 140 34]; %orange
 cmap(3,:) = [150 100 155]; %purple
 cmap(4,:) = [71 195 211]; %lightblue
+cmap(5,:) = [33 64 154]; %darkblue
 cmap(6,:) = [173 209 54]; %lightgreen
 cmap(7,:) = [238 132 181]; %pink
 cmap(8,:) = [255 222 23]; %yellow

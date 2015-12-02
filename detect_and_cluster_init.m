@@ -46,8 +46,8 @@ end
 if ~isfield(params,'cluster_bias')
     params.cluster_bias = 0.85; %bias to control type 2 errors for classifying SUs
 end
-if ~isfield(params,'summary_plot')
-    params.summary_plot = 1; 
+if ~isfield(params,'summary_plot') 
+    params.summary_plot = 1;  %1 == make plot but keep it invisible, 2 == make visible plot
 end
 if ~isfield(params,'reg_lambda')
     params.reg_lambda = 0; %regularization on Cov Mats for EM (Matlab based, doesnt seem to help)
@@ -74,6 +74,8 @@ end
 if ~isfield(params,'max_back_comps')
     params.max_back_comps = 3; %maximum number of Gaussians to try modeling background noise with
 end
+
+params.max_retrig_rate = 250; %in Hz
 
 %% LOAD VOLTAGE SIGNAL
 %loads in (high-pass filtered) voltage signal
@@ -146,125 +148,92 @@ clusterDetails.recDur = length(V)/Fs;
 clusterDetails.params = params;
 clusterDetails.times = Spikes.times;
 clusterDetails.spk_inds = spk_id(:);
-
+clusterDetails.Fs = Fs;
 clusterDetails = compute_cluster_stats(clusterDetails,Spikes,spike_features);
 
 %% Check if trigger threshold is too high
 if clusterDetails.iso_dists(1) > 2 %if there is a reasonable SU
     needToRetrigger = true;
     n_retriggers = 0;
-    while needToRetrigger && n_retriggers < params.max_n_retriggers
-        su_inds = find(clusterDetails.spike_clusts == 2);
-        [nn,xx] = hist(Spikes.trig_vals(su_inds),500);
+    while needToRetrigger && n_retriggers < params.max_n_retriggers %try up to max_n_retriggers times
+        su_inds = find(clusterDetails.spike_clusts == 2); %SU spikes
+        
+        %compute the density of SU trigger values
+        [nn,xx] = hist(Spikes.trig_vals(su_inds),500); %distribution of SU trigger values
         nn = smooth(nn,50)/sum(nn); %smoothed spike amp density
-        prev_rate = sum(clusterDetails.n_spks)/clusterDetails.recDur;
-        new_rate = prev_rate*2; %try doubling trigger rate
         if params.thresh_sign > 0
             nn = flipud(nn);
         end
-        if nn(end) < max(nn)/5 || new_rate > 250
+        
+        prev_rate = sum(clusterDetails.n_spks)/clusterDetails.recDur; %total spike rate
+        new_rate = prev_rate*2; %try doubling trigger rate
+        
+        %check whether the density of SU triggers is low enough at the cutoff (or if were triggering
+        %above the max-rate)
+        if nn(end) < max(nn)/5 || new_rate > params.max_retrig_rate
             needToRetrigger = false;
             break;
         end
+        
         fprintf('Possible SU cutoff detected, trying retriggering\n');
         new_params = params;
         new_params.target_rate = new_rate;
         fixed = 0; %retrigger and fit new model params
         [clusterDetails,spike_features,spike_xy,Spikes] = apply_clustering(sfile,clusterDetails,new_params,fixed);
-        clusterDetails = compute_cluster_stats(clusterDetails,Spikes,spike_features);
         
-        %may need additional components to model background with new
-        %triggering
-        cur_n_back_comps = clusterDetails.Ncomps - 1;
-        while cur_n_back_comps < params.max_back_comps
-            cur_n_back_comps = cur_n_back_comps + 1;
-            fprintf('Trying background split %d of %d\n',cur_n_back_comps,params.max_back_comps);
-            
-            [spike_xy,xyproj_mat] = Project_GMMfeatures(spike_features, clusterDetails.gmm_fit,clusterDetails.cluster_labels);
-            %implement a sign convention that positive values of the first dimension
-            %correspond to higher spike amplitudes
-            bb = corr(spike_xy(:,1),abs(Spikes.trig_vals(:)));
-            if bb < 0
-                spike_xy(:,1) = -spike_xy(:,1);
-                xyproj_mat(:,1) = -xyproj_mat(:,1);
-            end
-            [new_GMM_obj, new_distance,new_comp_idx, new_clust_labels] = ...
-                try_backgnd_splitting(clusterDetails.gmm_fit,Spikes.V,spike_features,spike_xy,xyproj_mat,clusterDetails.comp_idx,clusterDetails.cluster_labels,params);
-            
-            fprintf('Orig: %.3f New: %.3f \n',clusterDetails.dprime,new_distance);
-            if new_distance > clusterDetails.dprime
-                clusterDetails.gmm_fit = new_GMM_obj;
-                clusterDetails.comp_idx = new_comp_idx;
-                clusterDetails.cluster_labels = new_clust_labels;
-                clusterDetails = compute_cluster_stats(clusterDetails,Spikes,spike_features);                
-            end
+        if params.max_back_comps > 1 %try adding additional components to model background spikes
+            [clusterDetails.gmm_fit,clusterDetails.dprime,clusterDetails.comp_idx,clusterDetails.cluster_labels] = add_background_comps(...
+                Spikes,spike_features,clusterDetails.gmm_fit,clusterDetails.dprime,clusterDetails.cluster_labels,clusterDetails.comp_idx,params);
         end
-
         n_retriggers = n_retriggers + 1;
     end
 end
 
 
 %% CHECK FOR ADDITIONAL SUs BY FITTING MODELS TO THE BACKGROUND SPIKES RECURSIVELY
-max_n_sus = 5;
-if clusterDetails.iso_dists(1) > 2
+max_n_sus = 5; %maximum number of SUs 
+if clusterDetails.iso_dists(1) > 2 %if the cluster separation is decent, try finding more SUs
     cur_n_SUs = 1;
     new_cluster = clusterDetails;
     while cur_n_SUs <= max_n_sus
         fprintf('Trying to fit %d SUs\n',cur_n_SUs+1);
         
+        %fit model to background spikes (with random init)
         cur_back_spikes = find(new_cluster.spike_clusts == 1); %current background spikes
         [back_GMM, back_dist,back_comp_idx,back_clust_labels,back_cluster_stats] = ...
             GMM_fit(Spikes.V(cur_back_spikes,:),spike_features(cur_back_spikes,:),2,params);
+        
         if isobject(back_GMM)
-            cur_n_back_comps = 1;
-            while cur_n_back_comps < params.max_back_comps
-                cur_n_back_comps = cur_n_back_comps + 1;
-                fprintf('Trying background split %d of %d\n',cur_n_back_comps,params.max_back_comps);
-                
-                [temp_spike_xy,temp_xyproj_mat] = Project_GMMfeatures(spike_features(cur_back_spikes,:), back_GMM,back_clust_labels);
-                %implement a sign convention that positive values of the first dimension
-                %correspond to higher spike amplitudes
-                bb = corr(temp_spike_xy(:,1),abs(Spikes.trig_vals(cur_back_spikes)));
-                if bb < 0
-                    temp_spike_xy(:,1) = -temp_spike_xy(:,1);
-                    temp_xyproj_mat(:,1) = -temp_xyproj_mat(:,1);
-                end
-                [newback_GMM_obj, newback_distance,newback_comp_idx, newback_clust_labels] = ...
-                    try_backgnd_splitting(back_GMM,Spikes.V(cur_back_spikes,:),spike_features(cur_back_spikes,:),...
-                    temp_spike_xy,temp_xyproj_mat,back_comp_idx,back_clust_labels,params);
-                
-                fprintf('Orig: %.3f New: %.3f \n',back_dist,newback_distance);
-                if newback_distance > back_dist
-                    back_GMM = newback_GMM_obj;
-                    back_dist = newback_distance;
-                    back_comp_idx = newback_comp_idx;
-                    back_clust_labels = newback_clust_labels;
-                end
+            
+            if params.max_back_comps > 1 %try adding additional components to model background spikes
+                back_Spikes.trig_vals = Spikes.trig_vals(cur_back_spikes,:);
+                back_Spikes.V = Spikes.V(cur_back_spikes,:,:);
+                [back_GMM,back_dist,back_comp_idx,back_clust_labels] = add_background_comps(...
+                    back_Spikes,spike_features(cur_back_spikes,:),back_GMM,back_dist,back_clust_labels,back_comp_idx,params);
             end
-            
-            %             init_comp_idx = clusterDetails.comp_idx;
-            %             init_comp_idx = init_comp_idx + length(back_clust_labels);
-            %             init_comp_idx(cur_back_spikes) = back_comp_idx;
-            
+                        
             init_comp_idx = clusterDetails.comp_idx;
             uids = init_comp_idx <= 0;
             buids = back_comp_idx <= 0;
-            cuids = setdiff(1:N_spks,[uids; cur_back_spikes(buids)]);
+            cuids = setdiff(1:N_spks,[uids; cur_back_spikes(buids)]); %non outlier spikes
+            %add in new component
             init_comp_idx = init_comp_idx + length(back_clust_labels);
             init_comp_idx(cur_back_spikes) = back_comp_idx;
             [~,~,init_comp_idx(cuids)] = unique(init_comp_idx(cuids)); %bug fixed 11-15-13
             
+            %add in new cluster labels
             init_cluster_labels = clusterDetails.cluster_labels;
             init_cluster_labels(init_cluster_labels == 1) = [];
             init_cluster_labels = [back_clust_labels init_cluster_labels + 1];
             
+            %refit GMM with all data
             n_comps = length(init_cluster_labels);
             [back_GMM, back_dist,back_comp_idx,back_clust_labels,back_cluster_stats] = ...
-                GMM_fit(Spikes.V,spike_features,n_comps,params,[],init_comp_idx,init_cluster_labels);
+                GMM_fit(Spikes.V,spike_features,n_comps,params,init_comp_idx,init_cluster_labels);
             
+            %check if the new SU is good
             [new_Lratio,new_iso_dist] = compute_cluster_Lratio(spike_features,back_GMM,back_comp_idx,back_clust_labels);
-            n_good_SUs = sum(new_iso_dist > 2 & new_Lratio < 1e3);
+            n_good_SUs = sum(new_iso_dist > 2 & new_Lratio < 1e3); %number of good SUs
             if n_good_SUs > cur_n_SUs
                 clusterDetails.gmm_fit = back_GMM;
                 clusterDetails.comp_idx = back_comp_idx;

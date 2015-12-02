@@ -1,5 +1,12 @@
 function [] = check_cluster_alignment(probe_num,target_blocks)
+% [] = check_cluster_alignment(probe_num,target_blocks)
+% checks cluster label consistency for a given probe over recording blocks. Tries to 'reallign' them
+% based on similarity of avg spike waveforms
+% INPUTS: 
+%   probe_num: probe number
+%   target_blocks: set of blocks
 
+%%
 global base_save_dir     
 
 fprintf('Aligning cluster assignments across blocks for probe %d\n',probe_num);
@@ -14,8 +21,11 @@ N_sus = max(RefClusters{probe_num}.cluster_labels) - 1;
 cmap = cluster_cmap(N_sus);
 N_samps = length(RefClusters{probe_num}.params.spk_pts);
 N_chs = length(RefClusters{probe_num}.use_chs);
-ref_mean_spike = RefClusters{probe_num}.mean_spike(:,2:end);
+
+ref_mean_spike = RefClusters{probe_num}.mean_spike(:,2:end); %get mean spikes for all SUs on reference cluster
 ms_size = size(ref_mean_spike);
+
+%load all avg spike waveforms
 all_mean_spike = nan(n_blocks,ms_size(1),ms_size(2));
 for bb = 1:length(target_blocks)
     cur_data = [base_save_dir sprintf('/Block%d_Clusters.mat',target_blocks(bb))];
@@ -25,6 +35,7 @@ for bb = 1:length(target_blocks)
     end
 end
 
+%consider all permutations and find the one that gives the best alignment with reference clusters
 max_n_sus = 8;
 if N_sus > max_n_sus
     error('Too many possible SU permutations to consider!');
@@ -33,15 +44,16 @@ perm_set = perms(1:N_sus);
 n_perms = size(perm_set,1);
 block_Ctrace = nan(1,n_perms);
 best_perms = nan(1,n_blocks);
-for bb = 1:length(target_blocks)
+for bb = 1:length(target_blocks) %for each block
     uset = find(~isnan(all_mean_spike(bb,1,:)));
-    Cmat = corr(ref_mean_spike,squeeze(all_mean_spike(bb,:,:)));
-    for ii = 1:n_perms
+    Cmat = corr(ref_mean_spike,squeeze(all_mean_spike(bb,:,:))); %similarity matrix of mean spk waveforms
+    for ii = 1:n_perms %find the permutation that gives the best alignment
         block_Ctrace(ii) = nansum(diag(Cmat(perm_set(ii,:),:)));
     end
     [~,best_perms(bb)] = max(block_Ctrace);
 end
 
+%apply cluster relabelings 
 for bb = 1:length(target_blocks)
     fprintf('Relabeling clusters for block %d\n',target_blocks(bb));
     cur_data = [base_save_dir sprintf('/Block%d_Clusters.mat',target_blocks(bb))];

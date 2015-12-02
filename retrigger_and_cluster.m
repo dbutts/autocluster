@@ -1,5 +1,17 @@
 function [Cdump] = retrigger_and_cluster(RefClusters,block_num,probe_num,trig_rate,trig_sign,reapply,additional_params)
-
+% [Cdump] = retrigger_and_cluster(RefClusters,block_num,probe_num,trig_rate,<trig_sign>,<reapply>,<additional_params>)
+% retrigger spikes from loadedData and recluster using RefCluster for initialization
+% INPUTS: 
+%   RefClusters: reference clusterDetails file
+%   block_num: block number to cluster
+%   probe_num: probe number to cluster
+%   trig_rate: desired spike rate
+%   trig_sign: trig of peaks (+1) or valleys (-1) (default -1)
+%   reapply: reapply previous clustering (default 0)
+%   struct of any additional parameters
+% OUTPUTS:
+%   Cdump resulting clusterDetails file
+%%
 global data_dir base_save_dir init_save_dir Expt_name Vloaded n_probes loadedData raw_block_nums
 
 if nargin < 5 || isempty(trig_sign)
@@ -12,7 +24,24 @@ if nargin < 7
     additional_params = [];
 end
 
-if Expt_name(1) == 'G'
+fprintf('Retriggering probe %d\n',probe_num);
+cur_clust_params = RefClusters{probe_num}.params;
+cur_clust_params.summary_plot = 2; %make summary plot visible
+cur_clust_params.target_rate = trig_rate;
+cur_clust_params.thresh_sign = trig_sign;
+
+%include any additionally specified parameters
+if ~isempty(additional_params)
+   pfields = fieldnames(additional_params);
+   for ii = 1:length(pfields)
+      cur_clust_params = setfield(cur_clust_params,pfields{ii},getfield(additional_params,pfields{ii})); 
+   end
+end
+
+Cdump  = [];
+
+%% get loadedData for desired block and probe number
+if Expt_name(1) == 'G' %should change this flag to rec_type
     loadedData = [data_dir sprintf('/Expt%d.p%dFullV.mat',raw_block_nums(block_num),probe_num)];
 else
     sfile_name = [data_dir sprintf('/Expt%dFullV.mat',raw_block_nums(block_num))];
@@ -22,26 +51,10 @@ else
         Vloaded = raw_block_nums(block_num);
     end
 end
-
-Cdump  = [];
-
-fprintf('Retriggering probe %d\n',probe_num);
-cur_clust_params = RefClusters{probe_num}.params;
-cur_clust_params.summary_plot = 2; %make summary plot visible
-cur_clust_params.target_rate = trig_rate;
-cur_clust_params.thresh_sign = trig_sign;
-
-if ~isempty(additional_params)
-   pfields = fieldnames(additional_params);
-   for ii = 1:length(pfields)
-      cur_clust_params = setfield(cur_clust_params,pfields{ii},getfield(additional_params,pfields{ii})); 
-   end
-end
-
 cur_dat_name = [base_save_dir sprintf('/Block%d_Clusters.mat',block_num)];
 load(cur_dat_name,'Clusters');
-
-if reapply == 0
+%%
+if reapply == 0 %if were fitting a new model
     if n_probes == 24
         use_chs = [probe_num-1 probe_num probe_num + 1];
         use_chs(use_chs < 1 | use_chs > n_probes) = [];
@@ -49,14 +62,16 @@ if reapply == 0
         use_chs = [];
     end
     [cluster_details,spike_features,sum_fig] = detect_and_cluster_init(loadedData,cur_clust_params,use_chs);
-else
-    [cluster_details,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,RefClusters{probe_num},cur_clust_params,-1);
+else %if using existing model
+    fixed = -1;
+    [cluster_details,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,RefClusters{probe_num},cur_clust_params,fixed);
     sum_fig = create_summary_cluster_fig(cluster_details,Spikes,spike_xy,cur_clust_params);
     clear Spikes
 end
 
 cluster_details.base_block = RefClusters{probe_num}.base_block;
 
+%check if we want to keep this new clustering
 resp = input('Keep new clustering (y/n, d for cluster dump)?','s');
 if strcmpi(resp,'Y')
     fprintf('Saving cluster details\n');

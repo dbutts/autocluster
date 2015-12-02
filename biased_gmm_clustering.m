@@ -10,11 +10,7 @@ end
 if ~isnan(outlier_thresh)
     min_mah_dists = sqrt(min(M,[],2));
     outliers = min_mah_dists > outlier_thresh;
-%     comp_idx(outliers) = -1;
 end
-
-% uspks = comp_idx > 0;
-% comp_idx(uspks) = cluster_labels(comp_idx(uspks));
 
 back_comps = find(cluster_labels==1);
 back_P = P(:,back_comps);

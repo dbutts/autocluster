@@ -2,15 +2,20 @@ function [cluster_labels, cluster_stats] = relabel_clusters(SpikeV,comp_idx,clus
 % [cluster_labels, cluster_stats] = relabel_clusters(SpikeV,comp_idx,cluster_labels)
 % determines which of two clusters is the background, and sets the cluster
 % label to 1 for background and 2 for unit. 
-
+% INPUTS: 
+%   SpikeV: array of spike waveforms
+%   comp_idx: component assignment for each spike
+%   cluster_labels: cluster label for each Gaussian component
+% OUTPUTS:
+%   cluster_labels: new cluster labels
+%   cluster_stats: struct of cluster statistics
+%%
 if isnan(comp_idx)
     cluster_labels = nan;
     cluster_stats = nan;
     return;
 end
 cluster_assignments = zeros(size(comp_idx));
-uspks = comp_idx > 0; %non-outlier spikes
-unique_cids = unique(comp_idx(uspks)); %unique Gaussian components
 n_clusters = nanmax(cluster_labels);
 for ii = 1:n_clusters
     component_set = find(cluster_labels == ii);
@@ -37,7 +42,8 @@ if size(cluster_stats.mean_spike,2) < 2
     cluster_stats.std_spike(:,2) = nan;
 end
 
-cluster_labels = label_order(cluster_labels);
+cluster_labels = label_order(cluster_labels); %reorder labels.
 
+%reorder clusters in stats struct
 cluster_stats.mean_spike = cluster_stats.mean_spike(:,label_order);
 cluster_stats.std_spike = cluster_stats.std_spike(:,label_order);

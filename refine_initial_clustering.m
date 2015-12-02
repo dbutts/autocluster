@@ -1,5 +1,5 @@
-
-%% RETRIGGERING
+%SET OF FUNCTIONS FOR MODIFYING INITIAL CLUSTERING RESULTS
+%% RETRIGGER AND THEN APPLY AUTOCLUSTERING
 block_num = 31;
 probe_num = 15;
 target_rate = 250;
@@ -15,17 +15,17 @@ load(rclust_name);
 
 Cdump = retrigger_and_cluster(RefClusters,block_num,probe_num,target_rate,trig_sign,reapply,add_params);
 
-%% SPLIT COMPONENTS
+%% SPLIT COMPONENTS AND REFIT MODEL
 block_num = 31;
 probe_num =  15;
 split_GMM_component(block_num,probe_num);
 
-%% DELETE COMPONENT
+%% DELETE COMPONENT AND REFIT MODEL
 block_num = 15;
 probe_num = 5;
 delete_GMM_component(block_num,probe_num);
 
-%% EXCLUSION CLUSTERING
+%% TRY AUTOCLUSTERING WITH SPIKES FROM SPECIFIED CLUSTER EXCLUDED
 block_num = 31;
 probe_num = 15;
 exclude_SUs = [2];
@@ -40,9 +40,9 @@ block_num = 5;
 probe_num = 19;
 cycle_projections(block_num,probe_num);
 
-%% SPLIT COMPONENTS
-block_num = 14;
-probe_num = 17;
-use_2d = false;
-use_proj = [2 3];
-split_GMM_component_dimspec(block_num,probe_num,use_proj,use_2d);
+%% SPLIT COMPONENT ALONG SPECIFIED FEATURE DIMENSION (WORK IN PROGRESS)
+% block_num = 14;
+% probe_num = 17;
+% use_2d = false;
+% use_proj = [2 3];
+% split_GMM_component_dimspec(block_num,probe_num,use_proj,use_2d);

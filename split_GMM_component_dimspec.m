@@ -1,8 +1,9 @@
 function [] = split_GMM_component_dimspec(block_num,probe_num,use_features,use_2d)
-
+% NEVER REALLY USED THIS FUNCTION BUT I BELIEVE IT WAS SUPPOSED TO ALLOW USER-SPECIFIED SPLITS ALONG
+% SPECIFIED FEATURE DIMENSIONS (RATHER THAN JUST IN XY-SPACE)
 %%
 if nargin < 4 || isempty(use_2d)
-    use_2d = false
+    use_2d = false;
 end
 
 global data_dir base_save_dir init_save_dir Expt_name Vloaded n_probes loadedData raw_block_nums

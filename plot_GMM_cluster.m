@@ -1,5 +1,12 @@
 function [f1] = plot_GMM_cluster(block_num,probe_num,precomp_spike_data)
+% [f1] = plot_GMM_cluster(block_num,probe_num,<precomp_spike_data>)
+% plot specified cluster
+% INPUTS:
+%   block_num
+%   probe_num
+%   <precomp_spike_data>: optional name of precomputed spike data file
 
+%%
 if nargin < 3
     precomp_spike_data = [];
 end

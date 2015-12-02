@@ -1,3 +1,8 @@
+%{
+This script allows user to decide which clusters to use for final clustering. Assigns cluster
+numberings, and computes stats.
+%}
+%% specify recording and data dirs
 clear all
 close all
 addpath('~/James_scripts/autocluster/');
@@ -6,21 +11,20 @@ global data_dir base_save_dir init_save_dir Expt_name monk_name rec_type Vloaded
 Expt_name = 'M320';
 monk_name = 'lem';
 rec_type = 'LP';
-
 rec_number = 1;
 % block_set = 1:21;
 
 Expt_num = str2num(Expt_name(2:end));
 
 data_loc = '/media/NTlab_data3/Data/bruce/';
-data_dir2 = ['/media/NTlab_data3/Data/bruce/' Expt_name];
-
+expt_file_loc = ['/media/NTlab_data3/Data/bruce/' Expt_name];
 base_save_dir = ['~/Analysis/bruce/' Expt_name '/clustering'];
 if rec_number > 1 %if you're splitting the recording into multiple separate chunks for clustering
    base_save_dir = [base_save_dir sprintf('/rec%d',rec_number)]; 
 end
 init_save_dir = [base_save_dir '/init'];
 spkdata_dir = [data_loc Expt_name '/spikes/'];
+data_dir = [data_loc Expt_name];%location of FullV files
 
 if ~exist(base_save_dir,'dir');
     mkdir(base_save_dir);
@@ -29,28 +33,21 @@ if ~exist(init_save_dir,'dir');
     mkdir(init_save_dir);
 end
 
-%location of FullV files
-data_dir = [data_loc Expt_name];
-
+target_probes = 1:n_probes;
+force_new_clusters = false; %if you want to
 
 Vloaded = nan;
-cd(data_dir2);
-if strcmp(Expt_name,'G029')
-    load('G029Expts.mat');
-else
-    load(sprintf('%s%sExpts.mat',monk_name,Expt_name));
-end
+
+load(sprintf('%s/%s%sExpts.mat',expt_file_loc,monk_name,Expt_name));
 if strcmp(rec_type,'UA')
     n_probes = 96;
 elseif strcmp(rec_type,'LP')
     n_probes = 24;
 end
 
-target_probes = 1:n_probes;
-force_new_clusters = false; %if you want to
-
+%% select usable blocks
 elen = cellfun(@(x) length(x),Expts);
-target_blocks = find(elen > 0);
+target_blocks = find(elen > 0); %use all blocks that contain data
 
 if strcmp(Expt_name,'M232')
     target_blocks = [37    38    39    43    46    47];
@@ -69,6 +66,7 @@ elseif strcmp(Expt_name,'G093')
 end
 
 fused = find(cellfun(@(X) length(X),Expts) > 0,1);
+%the actual numbers of the blocks in the data files might be different, so get these numbers
 if isfield(Expts{fused}.Header,'exptno')
     raw_block_nums = cellfun(@(X) X.Header.exptno,Expts,'uniformoutput',1); %block numbering for EM/LFP data sometimes isnt aligned with Expts struct
 else
@@ -124,7 +122,7 @@ end
 % imagesc(all_block_dprimes);
 % figure
 % imagesc(abs(all_block_best_isodist));
-%% load stats for each unique cluster
+%% load stats for each unique (non-background) cluster
 
 clear SU_clust_data
 su_cnt = 1;
@@ -145,8 +143,9 @@ for pp = 1:n_probes
     end
 end
 
-lrat_thresh = 1e3;
-iso_thresh = 2;
+%do some automatic selection of promising SU clusters (can be fairly lenient here)
+lrat_thresh = 1e3; %max Lratio
+iso_thresh = 2; %min iso-distance
 su_pnums = [SU_clust_data(:).probe_num];
 su_cnums = [SU_clust_data(:).cluster_label];
 % good_SUs = find([SU_clust_data(:).Lratio] <= lrat_thresh | [SU_clust_data(:).iso_dist] >= iso_thresh);
@@ -181,7 +180,6 @@ for ii = 1:n_good_units
 end
 
 %% compute iso dist and Lratio for each cluster in each block
-% target_blocks = [3 5 11];
 pSU_Lratio_mat = nan(max(target_blocks),length(SU_clust_data));
 pSU_isodist_mat = nan(max(target_blocks),length(SU_clust_data));
 pSU_refract_mat = nan(max(target_blocks),length(SU_clust_data));
@@ -220,8 +218,8 @@ end
 % ca = caxis();
 % caxis([2 ca(2)]);
 
-%% CHECK ALL SPIKE CORRELATIONS
-block_num = 31;
+%% CHECK ALL SPIKE CORRELATIONS (should either automate this, or turn it into a function)
+block_num = 31; %specify block to evaluate correlations on. may need to check correlations on multiple blocks
 cur_dat_name = [base_save_dir sprintf('/Block%d_Clusters.mat',block_num)];
 load(cur_dat_name,'Clusters');
 if strcmp(rec_type,'UA')
@@ -236,7 +234,7 @@ elseif strcmp(rec_type,'LP')
     end
 end
 
-bin_width = 0.001;
+bin_width = 0.001; %time resolution to compute correlations (in sec)
 t_axis = loadedData.Vtime(1):bin_width:loadedData.Vtime(end);
 binned_spikes = [];
 for ii = 1:length(good_SUs)
@@ -252,6 +250,7 @@ full_bs_corrmat = corr(binned_spikes);
 bs_corrmat = full_bs_corrmat;
 bs_corrmat(II <= JJ) = nan;
 
+%compute conditional probability of neuron 2 spiking given that neuron 1 spiked
 cond_p1 = nan(length(good_SUs),length(good_SUs));
 cond_p2 = cond_p1;
 for ii = 1:length(good_SUs)-1
@@ -262,8 +261,9 @@ for ii = 1:length(good_SUs)-1
         cond_p2(ii,jj) = sum(binned_spikes(s_is_spike,ii) > 0)/sum(s_is_spike);
     end
 end
-max_cond_prob = max(cond_p1,cond_p2);
+max_cond_prob = max(cond_p1,cond_p2); %the larger of the conditional spike probs. This is a more reliable measure than just the correlation, because firing rates can be very assymetric
 
+%compute cross-correlation functions
 maxlag = round(0.01/bin_width);
 htr_xcovs = nan(length(good_SUs),length(good_SUs),2*maxlag+1);
 for ii = 1:length(good_SUs)
@@ -280,6 +280,8 @@ for ii = 1:length(good_SUs)
     end
 end
 
+%look at conditional probability matrix (basically a correlation matrix) to identify potential
+%clusters sharing the same unit
 figure('name',sprintf('Block %d',block_num));
 imagesc(max_cond_prob); set(gca,'ydir','normal');
 set(gca,'xtick',1:length(good_SUs),'xticklabel',good_SUs);
@@ -289,7 +291,7 @@ colorbar;
 
 clear binned_spikes
 
-%% CHECK SPECIFIC SPIKE CORRELATIONS
+%% CHECK SPECIFIC SPIKE CORRELATIONS (evaluate a specific correlation)
 block_num = 31;
 check_pair = [31 33];
 
@@ -331,6 +333,8 @@ fprintf('Max conditional probability: %.4f\n',cur_prob);
 clear binned_spikes
 
 %% COMPARE spike waveforms for pair of clusters on a given pair of adjacent probes
+%for pairs with suspiciously high correlation, visualize average waveforms, decide which cluster to
+%use
 block_num = 31;
 pair = [32 34];
 spk_pts = [-12:27];
@@ -384,7 +388,7 @@ fprintf('Spike time correlation %.3f\n',max_cond_prob(ginds(1),ginds(2)));
 fprintf('SU %d, N%d, detected on Ch %d\n',pair(1),SU_clust_data(pair(1)).cluster_label,probe1);
 fprintf('SU %d, N%d detected on Ch %d\n',pair(2),SU_clust_data(pair(2)).cluster_label,probe2);
 
-%%
+%% table specifying for each recording, which cluster numbers we want to use
 init_use_SUs = [];
 switch Expt_name
     case 'M232'
@@ -473,7 +477,9 @@ switch Expt_name
         init_use_SUs = [38 94]; %G103 CHECKED
 end
 
-%% ASSIGN SU NUMBERS AND MANUALLY ELIMINATE BLOCKS WHERE CLUSTERING ISN"T CLEAR
+%% ASSIGN SU NUMBERS AND MANUALLY ELIMINATE BLOCKS WHERE CLUSTERING ISN'T CLEAR
+%set thresholds on iso-distance (min) and Lratio (max) for automatically identifying blocks where
+%cluster separation is too poor
 iso_thresh = 2.25;
 Lratio_thresh = 1e3;
 
@@ -484,15 +490,14 @@ SU_ID_mat(setdiff(1:max(target_blocks),target_blocks),:) = nan;
 
 %iso dist must be bigger than thresh in each block
 SU_ID_mat(pSU_isodist_mat < iso_thresh) = nan;
-no_iso_dist = isnan(pSU_isodist_mat); %instances where iso distwas not defined, use Lratio
+no_iso_dist = isnan(pSU_isodist_mat); %instances where iso distance not defined, use Lratio
 SU_ID_mat(no_iso_dist(pSU_Lratio_mat(no_iso_dist) > Lratio_thresh)) = nan;
 bad = find(isnan(pSU_Lratio_mat) & isnan(pSU_isodist_mat)); %don't use cluster when neither was defined
 SU_ID_mat(bad) = nan;
 
 %secondary check based on visual inspection, exclude cluster/blocks that don't look
-%good enough
+%good enough by manually setting the elements of SU_ID_Mat to nan
 switch Expt_name
-    
     case 'M266'
         SU_ID_mat(1:4,14) = 1;
         SU_ID_mat(5:end,14) = nan;
@@ -651,22 +656,22 @@ switch Expt_name
     case 'M320'
         SU_ID_mat([1:22],6) = nan;
         SU_ID_mat([1:4 23:25],7) = nan;
-
+        
         %units 8 and 9 are the same
         SU_ID_mat([1:12],8) = nan;
         SU_ID_mat([13:end],9) = nan;
-        SU_ID_mat(~isnan(SU_ID_mat(:,9)),9) = SU_ID_mat(find(~isnan(SU_ID_mat(:,8)),1),8); 
-   
+        SU_ID_mat(~isnan(SU_ID_mat(:,9)),9) = SU_ID_mat(find(~isnan(SU_ID_mat(:,8)),1),8);
+        
         SU_ID_mat([1:18 34:end],10) = nan; %for blocks 1-18 this cluster is a mixture of two SUs
-         SU_ID_mat([40],11) = nan; 
-         SU_ID_mat([1:6],13) = nan; 
-         SU_ID_mat([1],21) = nan; 
-         SU_ID_mat([1:18],22) = nan; 
-         SU_ID_mat([1:12],23) = nan; 
-         
-         SU_ID_mat([1 32],24) = nan; 
-         SU_ID_mat([1 3],26) = nan; 
-
+        SU_ID_mat([40],11) = nan;
+        SU_ID_mat([1:6],13) = nan;
+        SU_ID_mat([1],21) = nan;
+        SU_ID_mat([1:18],22) = nan;
+        SU_ID_mat([1:12],23) = nan;
+        
+        SU_ID_mat([1 32],24) = nan;
+        SU_ID_mat([1 3],26) = nan;
+        
         %units 28 and 29 are the same
         SU_ID_mat([1:30],28) = nan;
         SU_ID_mat([31:end],29) = nan;
@@ -675,7 +680,6 @@ switch Expt_name
         SU_ID_mat([1 ],30) = nan;
         SU_ID_mat([2:7],33) = nan;
         SU_ID_mat([1],34) = nan;
-
 end
 
 % figure;
@@ -684,7 +688,7 @@ end
 final_SU_set = unique(SU_ID_mat(~isnan(SU_ID_mat)));
 fprintf('Finalized %d unique SUs\n',length(final_SU_set));
 
-%%
+%% compute cluster stats for each block for putative SUs
 [grid_CLUSTnums,grid_BLOCKS] = meshgrid(1:length(SU_clust_data),1:max(target_blocks));
 
 clust_avg_rates = nan(length(final_SU_set),max(target_blocks),1);
@@ -748,7 +752,7 @@ tempc = ones(max(target_blocks),1);
 SU_allBlock_Data = struct('Lratios',mat2cell(clust_Lratios,tempr,tempc),'isoDists',mat2cell(clust_iso_dists,tempr,tempc),...
     'isoReliable',mat2cell(clust_iso_reliable,tempr,tempc),'dprimes',mat2cell(clust_dprimes,tempr,tempc),...
     'refract',mat2cell(clust_refracts,tempr,tempc));
-%%
+%% save out final clustering data
 fname = [base_save_dir '/final_cluster.mat'];
 fprintf('Saving final clustering to %s\n',fname);
 SU_target_blocks = target_blocks;
@@ -936,7 +940,7 @@ for bb = blocks_with_clusters'
     end
 end
 
-%% PLOT WAVEFORM DATA
+%% PLOT WAVEFORM DATA FOR EACH BLOCK
 fin_save_dir = [base_save_dir '/final'];
 if ~exist(fin_save_dir,'dir')
     mkdir(fin_save_dir);

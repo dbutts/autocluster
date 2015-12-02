@@ -1,7 +1,8 @@
-all_target_blocks = 1:40;
-fprintf('Loading Ref_Clusters\n');
-rclust_name = [base_save_dir '/Ref_Clusters.mat'];
-load(rclust_name);
+%SET OF FUNCTIONS FOR MODIFYING FULL CLUSTERING RESULTS
+
+% fprintf('Loading Ref_Clusters\n');
+% rclust_name = [base_save_dir '/Ref_Clusters.mat'];
+% load(rclust_name);
 
 %% JUST PLOT CLUSTER
 block_num = 4;
@@ -37,11 +38,11 @@ probe_num = 19;
 cycle_projections(block_num,probe_num);
 
 %% SPLIT COMPONENTS
-block_num = 14;
-probe_num = 17;
-use_2d = false;
-use_proj = [2 3];
-split_GMM_component_dimspec(block_num,probe_num,use_proj,use_2d);
+% block_num = 14;
+% probe_num = 17;
+% use_2d = false;
+% use_proj = [2 3];
+% split_GMM_component_dimspec(block_num,probe_num,use_proj,use_2d);
 
 %% CYCLE THROUGH CLUSTER PLOTS and do split/delete operations
 close all

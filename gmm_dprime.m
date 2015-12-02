@@ -24,7 +24,7 @@ distance = mahal(G,G.mu); %mahal distances between each pair of Gaussian means
 Dmat = zeros(nc,nc); %matrix of dprimes between Gauss components
 for j = 1:nc
     for k = 1:j-1
-        Dmat(j,k) = sqrt(2./((1./distance(j,k))+(1./distance(k,j)))); %symmetrized D-prime
+        Dmat(j,k) = sqrt(2./((1./distance(j,k))+(1./distance(k,j)))); 
         Dmat(k,j) = Dmat(j,k);
     end
 end

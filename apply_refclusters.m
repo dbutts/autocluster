@@ -1,30 +1,33 @@
+%{
+This script takes a set of reference clusters and uses those models to initialize GMM fits for
+clustering a set of recording blocks
+%}
+%% PARSE EXPT DATA
 clear all
 close all
-addpath('~/James_scripts/autocluster/');
-
-global data_dir base_save_dir init_save_dir spkdata_dir Expt_name monk_name rec_type Vloaded n_probes loadedData raw_block_nums
-Expt_name = 'M320';
-monk_name = 'lem';
-rec_type = 'LP';
-
-rec_number = 1;
-
-% block_set = [1:100];
-
-Expt_num = str2num(Expt_name(2:end));
 
 data_loc = '/media/NTlab_data3/Data/bruce/';
 
+global data_dir base_save_dir init_save_dir spkdata_dir full_save_dir Expt_name monk_name rec_type Vloaded n_probes loadedData raw_block_nums
+Expt_name = 'M320';
+monk_name = 'lem';
+rec_type = 'LP';
+rec_number = 1;
+
+Expt_num = str2num(Expt_name(2:end));
+
+
 %location of Expts.mat files
-data_dir2 = [data_loc Expt_name];
+expt_file_loc = [data_loc Expt_name];
 
-spkdata_dir = [data_loc Expt_name '/spikes/'];
-
+spkdata_dir = [data_loc Expt_name '/spikes/']; %directory to save temporary spike files
+data_dir = [data_loc Expt_name];%location of FullV files
 base_save_dir = ['~/Analysis/bruce/' Expt_name '/clustering'];
 if rec_number > 1 %if you're splitting the recording into multiple separate chunks for clustering
    base_save_dir = [base_save_dir sprintf('/rec%d',rec_number)]; 
 end
-init_save_dir = [base_save_dir '/init'];
+init_save_dir = [base_save_dir '/init'];%subdir for initial cluster fits
+full_save_dir = [base_save_dir '/full'];
 
 if ~exist(base_save_dir,'dir');
     mkdir(base_save_dir);
@@ -35,30 +38,27 @@ end
 if ~exist(spkdata_dir,'dir')
     mkdir(spkdata_dir);
 end
-
-%location of FullV files
-data_dir = [data_loc Expt_name];
-
-Vloaded = nan;
-cd(data_dir2);
-if strcmp(Expt_name,'G029')
-    load('G029Expts.mat');
-else
-    load(sprintf('%s%sExpts.mat',monk_name,Expt_name));
+if ~exist(full_save_dir,'dir');
+    mkdir(full_save_dir);
 end
 
 
+Vloaded = nan;%keeps track of which raw data file is currently loaded (Nan means none loaded)
+
+load(sprintf('%s/%s%sExpts.mat',expt_file_loc,monk_name,Expt_name));
 if strcmp(rec_type,'UA')
     n_probes = 96;
 elseif strcmp(rec_type,'LP')
     n_probes = 24;
 end
 
-target_probes = 1:n_probes;
-force_new_clusters = false; %if you want to ov
+target_probes = 1:n_probes; %set of probes to cluster
+force_new_clusters = false; %if you want to over-write existing clusters
 
 elen = cellfun(@(x) length(x),Expts);
-target_blocks = find(elen > 0);
+target_blocks = find(elen > 0); %use all blocks that contain data
+
+%the actual numbers of the blocks in the data files might be different, so get these numbers
 if isfield(Expts{1}.Header,'exptno')
     raw_block_nums = cellfun(@(X) X.Header.exptno,Expts,'uniformoutput',1); %block numbering for EM/LFP data sometimes isnt aligned with Expts struct
 else
@@ -79,30 +79,14 @@ for bb = target_blocks
 end
 target_blocks(ismember(target_blocks,missing_Vdata)) = [];
 
-
 n_blocks = max(target_blocks);
-n_cols = ceil(sqrt(n_blocks)); n_rows = ceil(n_blocks/n_cols);
+n_cols = ceil(sqrt(n_blocks)); n_rows = ceil(n_blocks/n_cols); %for making subplots across all blocks
 
-global full_save_dir
-
-full_save_dir = [base_save_dir '/full'];
-if ~exist(full_save_dir,'dir');
-    mkdir(full_save_dir);
+%if prespecifying a usable set of blocks
+if exist('usable_block_set','var')
+    target_blocks(~ismember(target_blocks,usable_block_set)) = [];
 end
-
-if strcmp(Expt_name,'M281')
-    target_blocks(target_blocks == 13) = [];
-end
-if strcmp(Expt_name,'M289')
-    target_blocks(target_blocks == 14 | target_blocks == 32) = [];
-end
-
-if exist('block_set','var')
-target_blocks(~ismember(target_blocks,block_set)) = [];
-end
-%%
-% ADD CLUSTER PERMUTATION CHECKING INTO THE APPLY REF CLUSTERS FUNCTION!
-
+%% RUN CLUSTERING
 fprintf('Loading RefClusters\n');
 rclust_dat_name = [base_save_dir '/Ref_Clusters.mat'];
 load(rclust_dat_name);
@@ -116,7 +100,8 @@ end
 
 all_clust_means = cell(n_probes,1);
 all_clust_stds = cell(n_probes,1);
-for bb = target_blocks
+for bb = target_blocks %loop over all target recording blocks
+    
     %for LP load all Voltage signals for this block
     if strcmp(rec_type,'LP')
         sfile_name = [data_dir sprintf('/Expt%dFullV.mat',raw_block_nums(bb))];
@@ -137,9 +122,9 @@ for bb = target_blocks
         Clusters = cell(n_probes,1);
     end
     
-    for probe_num = target_probes
+    for probe_num = target_probes %loop over target probes
         fprintf('Applying clustering for probe %d\n',probe_num);
-        if strcmp(rec_type,'UA')
+        if strcmp(rec_type,'UA') %need to load data for each probe individually with utah array data
             loadedData = [data_dir sprintf('/Expt%d.p%dFullV.mat',raw_block_nums(bb),probe_num)];
         end
         
@@ -166,16 +151,15 @@ for bb = target_blocks
             [new_cluster,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,RefClusters{probe_num});
             %     end
           
+            %save temporary spike data file
             spk_data_name = [spkdata_dir Expt_name sprintf('_p%d_blk%d.mat',probe_num,bb)];
             store_spike_data(Spikes,spk_data_name,1);
-            
         catch
             new_cluster.failed = 1;
             fprintf('Couldnt cluster probe %d block %d!\n',probe_num,bb);
         end
         
-        
-        if ~new_cluster.failed
+        if ~new_cluster.failed %if clustering succeeded make plot
             N_spks = size(spike_xy,1);
             spike_labels = new_cluster.spike_clusts;
             mu_inds = find(spike_labels == 1);
@@ -230,9 +214,10 @@ for bb = target_blocks
         %         saveas(full_dens_fig,pfname_de);
         %         close(full_dens_fig);
         
+        %save several measures of isolation quality
         probe_iso_quality(bb,probe_num,:) = [new_cluster.dprime new_cluster.LL new_cluster.Lratios(1) new_cluster.iso_dists(1)];
         
-        Clusters{probe_num} = new_cluster;
+        Clusters{probe_num} = new_cluster; %store clusterDetails
         
     end
     

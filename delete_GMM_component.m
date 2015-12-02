@@ -1,5 +1,12 @@
 function [] = delete_GMM_component(block_num,probe_num,precomp_spike_data)
+% [] = delete_GMM_component(block_num,probe_num,<precomp_spike_data>)
+% delete a user-specified gaussian component and refit GMM
+% INPUTS:
+%   block_num:
+%   probe_num
+%   <precomp_spike_data>: optional name of precomputed spike data file
 
+%%
 if nargin < 3
     precomp_spike_data = [];
 end
@@ -14,12 +21,13 @@ load(cur_clust_data,'Clusters');
 cur_cluster = Clusters{probe_num};
 new_cluster = cur_cluster;
 
-if ~isempty(precomp_spike_data)
+if ~isempty(precomp_spike_data) %if precomputed data file is specified load spike data from there
     loadedData = [];
     Vloaded = nan;
     Spikes = load_spike_data(precomp_spike_data);
-    [cur_cluster,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,cur_cluster,[],1,Spikes);
-else
+    fixed = 1;
+    [cur_cluster,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,cur_cluster,[],fixed,Spikes);
+else %otherwise retrigger spikes
     if Expt_name(1) == 'G'
         loadedData = [data_dir sprintf('/Expt%d.p%dFullV.mat',raw_block_nums(block_num),probe_num)];
     else
@@ -30,20 +38,15 @@ else
             Vloaded = raw_block_nums(block_num);
         end
     end
-    [cur_cluster,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,cur_cluster,[],1);
+    fixed = 1;
+    [cur_cluster,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,cur_cluster,[],fixed);
 end
-%%
 
 N_spks = size(spike_xy,1);
-% spike_labels = zeros(size(cur_cluster.comp_idx));
-% uids = find(cur_cluster.comp_idx > 0);
-% spike_labels(uids) = cur_cluster.cluster_labels(cur_cluster.comp_idx(uids));
-
 N_sus = length(unique(cur_cluster.cluster_labels)) - 1;
 spk_inds = find(cur_cluster.spike_clusts > 0);
-% mu_inds = find(spike_labels == 1);
-% cmap = cluster_cmap(N_sus);
 
+%% make plot of current clustering
 clear h leg_labels
 f1 = figure();
 subplot(2,1,1)
@@ -74,19 +77,21 @@ xlim(xl); ylim(yl);
 fp = get(gcf,'Position'); fp(4) = fp(4) + 600; fp(3) = fp(3) + 100;
 set(gcf,'Position',fp);
 
+%% prompt user to specify a component to delete and refit model
 target_comp = input('Which component do you want to delete?');
 if ~isempty(target_comp)
     [idx,nlogl,P] = cluster(cur_cluster.gmm_fit,spike_features);
-    P(:,target_comp) = 0;
-    [~,new_comp_ids] = max(P,[],2);
-    [~,~,new_comp_ids] = unique(new_comp_ids);
+    P(:,target_comp) = 0; %make prob 0 on component to delete
+    [~,new_comp_ids] = max(P,[],2); %reassign clustering
+    [~,~,new_comp_ids] = unique(new_comp_ids); %shift indices to exclude previous component
     
     new_cluster_labels = cur_cluster.cluster_labels;
     new_cluster_labels(target_comp) = [];
     N_comps = length(new_cluster_labels);
 
+    %refit GMM
     [new_cluster.gmm_fit, new_cluster.dprime, new_cluster.comp_idx, new_cluster.cluster_labels, new_cluster.cluster_stats, outliers] = ...
-        GMM_fit(Spikes.V, spike_features, N_comps, cur_cluster.params, N_comps,new_comp_ids,new_cluster_labels);
+        GMM_fit(Spikes.V, spike_features, N_comps, cur_cluster.params,new_comp_ids,new_cluster_labels);
     if ~isobject(new_cluster.gmm_fit)
         fprintf('GMM fitting failed, aborting...\n');
         if ishandle(f1)
@@ -94,18 +99,18 @@ if ~isempty(target_comp)
         end
         return;
     end
+    %recompute Gaussian component XY stats
     new_cluster.gmm_xyMeans = new_cluster.gmm_fit.mu*cur_cluster.xy_projmat;
     for ii = 1:size(new_cluster.gmm_fit.Sigma,3)
         new_cluster.gmm_xySigma(:,:,ii) = cur_cluster.xy_projmat' * squeeze(new_cluster.gmm_fit.Sigma(:,:,ii)) * cur_cluster.xy_projmat;
     end
 end
 
+%% plot new clustering
 spike_labels = zeros(size(new_cluster.comp_idx));
 uids = find(new_cluster.comp_idx > 0);
 spike_labels(uids) = new_cluster.cluster_labels(new_cluster.comp_idx(uids));
-% spike_labels = new_cluster.spike_clusts;
 spk_inds = find(spike_labels >= 1);
-% N_sus = nanmax(new_cluster.cluster_labels) - 1;
 cmap = jet(N_sus);
 
 subplot(2,1,1);hold off;
@@ -120,6 +125,7 @@ end
 legend(h,leg_labels);
 axis tight
 
+%% prompt user to specify new cluster labels
 new_labels = input('What are the cluster labels for the components (input as vector)?\n');
 while length(new_labels) ~= size(new_cluster.gmm_xyMeans,1)
     fprintf('Must assign a label to each component!\n');
@@ -128,8 +134,6 @@ end
 new_cluster.cluster_labels = new_labels;
 spike_labels(uids) = new_cluster.cluster_labels(new_cluster.comp_idx(uids));
 mu_inds = find(spike_labels == 1);
-% N_sus = length(unique(new_cluster.cluster_labels)) - 1;
-% N_sus = nanmax(new_cluster.cluster_labels) - 1;
 cmap = cluster_cmap(N_sus);
 clear h leg_labels;
 
@@ -153,19 +157,16 @@ end
 legend(h,leg_labels);
 axis tight
 
+%% check if user wants to keep new clustering
 keep = input('Use new cluster (y/n)?','s');
 if strcmpi(keep,'y')
-    %     spike_stats = get_cluster_stats(Spikes.V,spike_labels);
-    %     new_cluster.mean_spike = spike_stats.mean_spike;
-    %     new_cluster.std_spike = spike_stats.std_spike;
-    %     new_cluster.LL = new_cluster.gmm_fit.NlogL;
-    %     [new_cluster.Lratios,new_cluster.iso_dists] = compute_cluster_Lratio(spike_features,new_cluster.gmm_fit,new_cluster.comp_idx,new_cluster.cluster_labels);
-    [new_cluster,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,new_cluster,[],0,Spikes);
+    fixed = 2;
+    [new_cluster,spike_features,spike_xy,Spikes] = apply_clustering(loadedData,new_cluster,[],fixed,Spikes);
     Clusters{probe_num} = new_cluster;
     fprintf('Saving cluster details\n');
     save(cur_clust_data,'Clusters');
     
-    if block_num == new_cluster.base_block
+    if block_num == new_cluster.base_block %if this is already the ref cluster
         sum_fig = create_summary_cluster_fig(new_cluster,Spikes,spike_xy,new_cluster.params);
         pname = [init_save_dir sprintf('/Probe%d_Block%d_initclust',probe_num,block_num)];
         fillPage(gcf,'papersize',[14 8]);
@@ -176,7 +177,7 @@ if strcmpi(keep,'y')
         load(rclust_dat_name,'RefClusters');
         RefClusters{probe_num} = new_cluster;
         save(rclust_dat_name,'RefClusters');
-    else
+    else %if its not the refcluster, check if we want to make it the new refcluster
         resp = input('Save to RefClusters (y/n)?','s');
         if strcmpi(resp,'y')
             fprintf('Saving to RefClusters\n');
