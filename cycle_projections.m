@@ -1,5 +1,5 @@
 function [] = cycle_projections(block_num,probe_num,precomp_spike_data)
-% [] = cycle_projections(block_num,probe_num)
+% [] = cycle_projections(block_num,probe_num,<precomp_spike_data>)
 % cycles through all possible projections in feature space
 % INPUTS: 
 %   block_num
@@ -7,6 +7,10 @@ function [] = cycle_projections(block_num,probe_num,precomp_spike_data)
 %   <precomp_spike_data>: file name of precomputed data
 %%
 global data_dir base_save_dir init_save_dir Expt_name Vloaded n_probes loadedData raw_block_nums
+
+if nargin < 3 
+    precomp_spike_data = [];
+end
 
 fprintf('Loading block %d Clusters\n',block_num);
 cur_clust_data = [base_save_dir sprintf('/Block%d_Clusters.mat',block_num)];
