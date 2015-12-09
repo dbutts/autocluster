@@ -181,7 +181,9 @@ if clusterDetails.iso_dists(1) > 2 %if there is a reasonable SU
         fixed = 0; %retrigger and fit new model params
         [clusterDetails,spike_features,spike_xy,Spikes] = apply_clustering(sfile,clusterDetails,new_params,fixed);
         
-        if params.max_back_comps > 1 %try adding additional components to model background spikes
+        %try adding background comps if were not already over our threshold
+        cur_n_back_comps = clusterDetails.Ncomps - 1;
+        while cur_n_back_comps < params.max_back_comps
             [clusterDetails.gmm_fit,clusterDetails.dprime,clusterDetails.comp_idx,clusterDetails.cluster_labels] = add_background_comps(...
                 Spikes,spike_features,clusterDetails.gmm_fit,clusterDetails.dprime,clusterDetails.cluster_labels,clusterDetails.comp_idx,params);
         end
