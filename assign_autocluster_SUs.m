@@ -699,54 +699,55 @@ clust_Lratios = nan(length(final_SU_set),max(target_blocks));
 clust_dprimes = nan(length(final_SU_set),max(target_blocks));
 clust_refracts = nan(length(final_SU_set),max(target_blocks));
 clust_iso_reliable = nan(length(final_SU_set),max(target_blocks));
-for bb = 1:length(target_blocks)
+for bb = 1:length(target_blocks) %loop over blocks
     fprintf('Processing block %d of %d\n',bb,length(target_blocks));
     cur_dat_name = [base_save_dir sprintf('/Block%d_Clusters.mat',target_blocks(bb))];
     load(cur_dat_name,'Clusters');
     
-    for cc = 1:length(final_SU_set);
+    for cc = 1:length(final_SU_set); %loop over SUs (this is really inefficient to do this every time in the block-loop. Should be fixed, but doesnt really matter)
         cur_SU_num = final_SU_set(cc);
-        uu = find(SU_ID_mat == cur_SU_num);
-        used_clusts = grid_CLUSTnums(uu);
-        cur_SU_probes = su_pnums(used_clusts);
-        cur_SU_clusts = su_cnums(used_clusts);
-        cur_SU_blocks = grid_BLOCKS(uu);
-        best_probe = mode(cur_SU_probes);
+        uu = find(SU_ID_mat == cur_SU_num); %find set of blocks and clusters mapped to this SU
+        used_clusts = grid_CLUSTnums(uu); %set of clusters
+        cur_SU_probes = su_pnums(used_clusts); %corresponding probes
+        cur_SU_clusts = su_cnums(used_clusts); %cluster numbers
+        cur_SU_blocks = grid_BLOCKS(uu); %block numbers
+        best_probe = mode(cur_SU_probes); %most used probe for clustering this SU
         
-        temp = find(cur_SU_blocks == target_blocks(bb));
-        if isempty(temp)
+        temp = find(cur_SU_blocks == target_blocks(bb)); 
+        if isempty(temp) %if this SU was not isolated for this block
             spike_xy = Clusters{best_probe}.spike_xy;
             clust_spikes = [];
             back_X_prcs(cc,target_blocks(bb),:) = prctile(spike_xy(:,1),[10 50 90]);
-        else
+        else %if it was isolated
             spike_xy = Clusters{cur_SU_probes(temp)}.spike_xy;
             clust_spikes = find(Clusters{cur_SU_probes(temp)}.spike_clusts == cur_SU_clusts(temp));
             non_clust_spikes = find(Clusters{cur_SU_probes(temp)}.spike_clusts > 0);
             non_clust_spikes(ismember(non_clust_spikes,clust_spikes)) = [];
             back_spikes = find(Clusters{cur_SU_probes(temp)}.spike_clusts == 1);
             
-            clust_avg_rates(cc,target_blocks(bb)) = length(clust_spikes)/Clusters{cur_SU_probes(temp)}.recDur;
-            clust_X_prcs(cc,target_blocks(bb),:) = prctile(spike_xy(clust_spikes,1),[10 50 90]);
-            back_X_prcs(cc,target_blocks(bb),:) = prctile(spike_xy(:,1),[10 50 90]);
+            clust_avg_rates(cc,target_blocks(bb)) = length(clust_spikes)/Clusters{cur_SU_probes(temp)}.recDur; %avg spike rate
+            clust_X_prcs(cc,target_blocks(bb),:) = prctile(spike_xy(clust_spikes,1),[10 50 90]); %prctiles of x-projection of SU spikes
+            back_X_prcs(cc,target_blocks(bb),:) = prctile(spike_xy(:,1),[10 50 90]); %prctiles of x-projections of non-SU spikes
         
             clust_spike_times = Clusters{cur_SU_probes(temp)}.times(clust_spikes);
-            isis = diff(clust_spike_times);
-            refract_ratio = sum(isis < 1e-3)/length(isis);
-            clust_refracts(cc,target_blocks(bb)) = refract_ratio;
+            isis = diff(clust_spike_times); %isis
+            clust_refracts(cc,target_blocks(bb)) = sum(isis < 1e-3)/length(isis); %fraction of ISIs < 1 ms
             
-            clust_mean = mean(spike_xy(clust_spikes,1));
-            back_mean = mean(spike_xy(back_spikes,1));
-            clust_var = var(spike_xy(clust_spikes,1));
-            back_var = var(spike_xy(back_spikes,1));
-            dprime = abs((clust_mean - back_mean))./sqrt(0.5*(clust_var + back_var));
+            clust_mean = mean(spike_xy(clust_spikes,1)); %within-cluster average x-proj
+            back_mean = mean(spike_xy(back_spikes,1)); %background avg x-proj
+            clust_var = var(spike_xy(clust_spikes,1)); %vaariance of cluster x-proj
+            back_var = var(spike_xy(back_spikes,1)); %var of background
+            dprime = abs((clust_mean - back_mean))./sqrt(0.5*(clust_var + back_var)); %dprime of x-dim
             
-            clust_iso_dists(cc,target_blocks(bb)) = Clusters{cur_SU_probes(temp)}.iso_dists(cur_SU_clusts(temp)-1);
+            clust_iso_dists(cc,target_blocks(bb)) = Clusters{cur_SU_probes(temp)}.iso_dists(cur_SU_clusts(temp)-1); %need to subtract one because the background cluster isn't included
             clust_Lratios(cc,target_blocks(bb)) = Clusters{cur_SU_probes(temp)}.Lratios(cur_SU_clusts(temp)-1);
             clust_dprimes(cc,target_blocks(bb)) = dprime;
-            clust_iso_reliable(cc,target_blocks(bb)) = length(clust_spikes) < length(non_clust_spikes);
+            clust_iso_reliable(cc,target_blocks(bb)) = length(clust_spikes) < length(non_clust_spikes); %can only use isolation distance when there's more non-cluster spikes than cluster spikes
         end
     end
 end
+
+%build struct array
 tempr = ones(length(final_SU_set),1);
 tempc = ones(max(target_blocks),1);
 SU_allBlock_Data = struct('Lratios',mat2cell(clust_Lratios,tempr,tempc),'isoDists',mat2cell(clust_iso_dists,tempr,tempc),...
@@ -757,7 +758,6 @@ fname = [base_save_dir '/final_cluster.mat'];
 fprintf('Saving final clustering to %s\n',fname);
 SU_target_blocks = target_blocks;
 save(fname,'SU_clust_data','SU_ID_mat','SU_target_blocks','SU_allBlock_Data');
-
 
 %% CREATE SCATTERPLOTS FOR EACH BLOCK 
 fin_save_dir = [base_save_dir '/final'];
