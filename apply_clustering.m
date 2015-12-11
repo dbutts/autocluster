@@ -123,7 +123,7 @@ spike_clusts = int16(nan(size(new_cluster.comp_idx)));
 spike_clusts(uids) = (new_cluster.cluster_labels(new_cluster.comp_idx(uids)));
 new_cluster.spike_clusts = spike_clusts(:);
 
-if fixed == 0 %if we want to cluster new data
+if ismember(fixed,[-1,0]) %if we want to cluster new data
     
     init_comp_idx = cluster(new_cluster.gmm_fit,spike_features); %apply cluster model to new spike features
     %detect outliers

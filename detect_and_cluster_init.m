@@ -178,15 +178,13 @@ if clusterDetails.iso_dists(1) > 2 %if there is a reasonable SU
         fprintf('Possible SU cutoff detected, trying retriggering\n');
         new_params = params;
         new_params.target_rate = new_rate;
-        fixed = 0; %retrigger and fit new model params
+        fixed = -1; %retrigger and fit new model params
         [clusterDetails,spike_features,spike_xy,Spikes] = apply_clustering(sfile,clusterDetails,new_params,fixed);
         
         %try adding background comps if were not already over our threshold
         cur_n_back_comps = clusterDetails.Ncomps - 1;
-        while cur_n_back_comps < params.max_back_comps
-            [clusterDetails.gmm_fit,clusterDetails.dprime,clusterDetails.comp_idx,clusterDetails.cluster_labels] = add_background_comps(...
-                Spikes,spike_features,clusterDetails.gmm_fit,clusterDetails.dprime,clusterDetails.cluster_labels,clusterDetails.comp_idx,params);
-        end
+        [clusterDetails.gmm_fit,clusterDetails.dprime,clusterDetails.comp_idx,clusterDetails.cluster_labels] = add_background_comps(...
+            Spikes,spike_features,clusterDetails.gmm_fit,clusterDetails.dprime,clusterDetails.cluster_labels,clusterDetails.comp_idx,params,cur_n_back_comps);
         n_retriggers = n_retriggers + 1;
     end
 end
