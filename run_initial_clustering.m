@@ -5,18 +5,20 @@ specified set of recording blocks
 
 clear all
 close all
-addpath('~/autocluster/'); 
+addpath('~/Data/'); 
 
 global data_dir base_save_dir init_save_dir Expt_name Vloaded n_probes loadedData raw_block_nums
 
-data_loc = '/media/NTlab_data3/Data/bruce/'; %directory containing raw data
+%data_loc = '/media/NTlab_data3/Data/bruce/'; %directory containing raw data
+data_loc = '/home/astaroth/Data/'; %directory containing raw data
 Expt_name = 'M320'; %short name of experiment
 monk_name = 'lem'; %(lem and jbe are the two monkeys so far)
 rec_type = 'LP'; %type of recording (LP for laminar probe, or UA for Utah array)
 rec_number = 1;
 
 %directory for saving clustering output
-base_save_dir = ['~/Analysis/bruce/' Expt_name '/clustering'];
+%base_save_dir = ['~/Analysis/bruce/' Expt_name '/clustering'];
+base_save_dir = ['/home/astaroth/Data/autocluster_example/analysis/' Expt_name '/clustering'];
 if rec_number > 1 %if you're splitting the recording into multiple separate chunks for clustering
    base_save_dir = [base_save_dir sprintf('/rec%d',rec_number)]; 
 end
@@ -31,7 +33,8 @@ end
 %location of FullV files
 data_dir = [data_loc Expt_name];
 
-expt_file_loc = ['/media/NTlab_data3/Data/bruce/' Expt_name]; %location of Expts.mat files (sometimes not in same raw-data dir)
+%expt_file_loc = ['/media/NTlab_data3/Data/bruce/' Expt_name]; %location of Expts.mat files (sometimes not in same raw-data dir)
+expt_file_loc = ['~/Data/' Expt_name]; %location of Expts.mat files (sometimes not in same raw-data dir)
 
 Vloaded = nan; %keeps track of which raw data file is currently loaded (Nan means none loaded)
 
@@ -43,7 +46,7 @@ clust_params.use_ms = false; %use mean-subtraction on templates (control whether
 clust_params.try_features = [1 2 4]; %features to use from the set: [PCs Voltage Energy Templates]
 clust_params.max_back_comps = 2; %maximum N components for modeling background spikes
 clust_params.cluster_bias = 0.5; %minimum posterior prob to assign a spike to non-background (SU) cluster
-clust_params.target_rate = 50; %target rate for spike detection
+clust_params.target_rate = 100; %target rate for spike detection
 
 %% PICK BLOCKS TO RUN INITIAL CLUSTER FITTING ON
 %set number of probes based on recording type

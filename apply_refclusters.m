@@ -6,7 +6,7 @@ clustering a set of recording blocks
 clear all
 close all
 
-data_loc = '/media/NTlab_data3/Data/bruce/';
+data_loc = '/home/astaroth/Data/';
 
 global data_dir base_save_dir init_save_dir spkdata_dir full_save_dir Expt_name monk_name rec_type Vloaded n_probes loadedData raw_block_nums
 Expt_name = 'M320';
@@ -22,7 +22,7 @@ expt_file_loc = [data_loc Expt_name];
 
 spkdata_dir = [data_loc Expt_name '/spikes/']; %directory to save temporary spike files
 data_dir = [data_loc Expt_name];%location of FullV files
-base_save_dir = ['~/Analysis/bruce/' Expt_name '/clustering'];
+base_save_dir = ['/home/astaroth/Data/autocluster_example/analysis/' Expt_name '/clustering'];
 if rec_number > 1 %if you're splitting the recording into multiple separate chunks for clustering
    base_save_dir = [base_save_dir sprintf('/rec%d',rec_number)]; 
 end

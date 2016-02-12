@@ -1,7 +1,7 @@
 %SET OF FUNCTIONS FOR MODIFYING INITIAL CLUSTERING RESULTS
 %% RETRIGGER AND THEN APPLY AUTOCLUSTERING
-block_num = 31;
-probe_num = 15;
+block_num = 40;
+probe_num = 24;
 target_rate = 250;
 trig_sign = -1;
 reapply = 0;
@@ -21,8 +21,8 @@ probe_num =  15;
 split_GMM_component(block_num,probe_num);
 
 %% DELETE COMPONENT AND REFIT MODEL
-block_num = 15;
-probe_num = 5;
+block_num = 31;
+probe_num = 15;
 delete_GMM_component(block_num,probe_num);
 
 %% TRY AUTOCLUSTERING WITH SPIKES FROM SPECIFIED CLUSTER EXCLUDED

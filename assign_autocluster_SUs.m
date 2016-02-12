@@ -5,7 +5,7 @@ numberings, and computes stats.
 %% specify recording and data dirs
 clear all
 close all
-addpath('~/James_scripts/autocluster/');
+%addpath('~/James_scripts/autocluster/');
 
 global data_dir base_save_dir init_save_dir Expt_name monk_name rec_type Vloaded n_probes loadedData raw_block_nums
 Expt_name = 'M320';
@@ -16,9 +16,13 @@ rec_number = 1;
 
 Expt_num = str2num(Expt_name(2:end));
 
-data_loc = '/media/NTlab_data3/Data/bruce/';
-expt_file_loc = ['/media/NTlab_data3/Data/bruce/' Expt_name];
-base_save_dir = ['~/Analysis/bruce/' Expt_name '/clustering'];
+% data_loc = '/media/NTlab_data3/Data/bruce/';
+% expt_file_loc = ['/media/NTlab_data3/Data/bruce/' Expt_name];
+% base_save_dir = ['~/Analysis/bruce/' Expt_name '/clustering'];
+data_loc = '/home/astaroth/Data/'; %directory containing raw data
+expt_file_loc = ['~/Data/' Expt_name]; 
+base_save_dir = ['/home/astaroth/Data/autocluster_example/analysis/' Expt_name '/clustering'];
+
 if rec_number > 1 %if you're splitting the recording into multiple separate chunks for clustering
    base_save_dir = [base_save_dir sprintf('/rec%d',rec_number)]; 
 end
@@ -219,7 +223,7 @@ end
 % caxis([2 ca(2)]);
 
 %% CHECK ALL SPIKE CORRELATIONS (should either automate this, or turn it into a function)
-block_num = 31; %specify block to evaluate correlations on. may need to check correlations on multiple blocks
+block_num = 22; %specify block to evaluate correlations on. may need to check correlations on multiple blocks
 cur_dat_name = [base_save_dir sprintf('/Block%d_Clusters.mat',block_num)];
 load(cur_dat_name,'Clusters');
 if strcmp(rec_type,'UA')
@@ -292,8 +296,8 @@ colorbar;
 clear binned_spikes
 
 %% CHECK SPECIFIC SPIKE CORRELATIONS (evaluate a specific correlation)
-block_num = 31;
-check_pair = [31 33];
+block_num = 22;
+check_pair = [1 2];
 
 cur_dat_name = [base_save_dir sprintf('/Block%d_Clusters.mat',block_num)];
 load(cur_dat_name,'Clusters');
@@ -335,8 +339,8 @@ clear binned_spikes
 %% COMPARE spike waveforms for pair of clusters on a given pair of adjacent probes
 %for pairs with suspiciously high correlation, visualize average waveforms, decide which cluster to
 %use
-block_num = 31;
-pair = [32 34];
+block_num = 22;
+pair = [1 2];
 spk_pts = [-12:27];
 
 cur_dat_name = [base_save_dir sprintf('/Block%d_Clusters.mat',block_num)];
@@ -699,6 +703,12 @@ clust_Lratios = nan(length(final_SU_set),max(target_blocks));
 clust_dprimes = nan(length(final_SU_set),max(target_blocks));
 clust_refracts = nan(length(final_SU_set),max(target_blocks));
 clust_iso_reliable = nan(length(final_SU_set),max(target_blocks));
+
+% Felix edit
+if length(SU_ID_mat) > length(init_use_SUs)
+SU_ID_mat=SU_ID_mat(:,init_use_SUs);
+end
+
 for bb = 1:length(target_blocks) %loop over blocks
     fprintf('Processing block %d of %d\n',bb,length(target_blocks));
     cur_dat_name = [base_save_dir sprintf('/Block%d_Clusters.mat',target_blocks(bb))];
@@ -706,7 +716,11 @@ for bb = 1:length(target_blocks) %loop over blocks
     
     for cc = 1:length(final_SU_set); %loop over SUs (this is really inefficient to do this every time in the block-loop. Should be fixed, but doesnt really matter)
         cur_SU_num = final_SU_set(cc);
+        %Felix edit
+        if cur_SU_num==0; continue; end
+        
         uu = find(SU_ID_mat == cur_SU_num); %find set of blocks and clusters mapped to this SU
+
         used_clusts = grid_CLUSTnums(uu); %set of clusters
         cur_SU_probes = su_pnums(used_clusts); %corresponding probes
         cur_SU_clusts = su_cnums(used_clusts); %cluster numbers

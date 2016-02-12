@@ -1,15 +1,18 @@
 clear all
 close all
-addpath('~/James_scripts/autocluster/');
+%addpath('~/James_scripts/autocluster/');
 
 global data_dir base_save_dir init_save_dir Expt_name Vloaded n_probes loadedData
-Expt_name = 'M266';
+Expt_name = 'M320';
 
 % data_loc = '/media/NTlab_data1/Data/bruce/';
-data_loc = '/home/james/Data/bruce/';
+%data_loc = '/home/james/Data/bruce/';
+%base_save_dir = ['~/Analysis/bruce/' Expt_name '/clustering2'];
+%init_save_dir = ['~/Analysis/bruce/' Expt_name '/clustering2/init'];
+data_loc = '/home/astaroth/Data/';
+base_save_dir = ['/home/astaroth/Data/autocluster_example/analysis/' Expt_name '/clustering'];
+init_save_dir = [base_save_dir '/init']; %subdir for initial cluster fits
 
-base_save_dir = ['~/Analysis/bruce/' Expt_name '/clustering2'];
-init_save_dir = ['~/Analysis/bruce/' Expt_name '/clustering2/init'];
 
 if ~exist(base_save_dir,'dir');
     mkdir(base_save_dir);
@@ -22,7 +25,7 @@ end
 data_dir = [data_loc Expt_name];
 
 %location of Expts.mat files
-data_dir2 = ['~/Data/bruce/' Expt_name];
+data_dir2 = ['~/Data/' Expt_name];
 
 Vloaded = nan;
 
